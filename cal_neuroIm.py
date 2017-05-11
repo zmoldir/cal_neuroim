@@ -14,11 +14,14 @@ from xlrd.biffh import XLRDError
 from math import sqrt
 from scipy.stats.stats import mode
 def importMatrix(filename,valSeperator,csvBool):
-    dataMatrix = [] # contains the data
+    dataMatrix = [] # TODO: it's busted. Turn this into a proper pandas routine instead of some csv-reader BS
     try:
         if(csvBool):
-            dataMatrix = pandas.read_csv(filename, header=None)
-            numOfVals = len(dataMatrix[-1])
+            frame = pandas.read_csv(filename)
+            
+            for x in frame.values:
+                dataMatrix.append(x)
+            numOfVals = x.size
         else:
             try:
                 book = xlrd.open_workbook(filename)
@@ -454,17 +457,6 @@ def maxAmp(inputData):
             maxVal = float(value)
             maxPosition = position 
     return(maxVal, maxPosition);
-
-def csvReader(csv_reader): 
-    ''' brute-force the reader past NULL-bytes or similar problems
-    '''
-    while True: 
-        try: 
-            yield next(csv_reader) 
-        except csv.Error: 
-            pass
-        continue 
-    return  
 
 def detectNumOfPeaks(data):
     if(len(data) <2):

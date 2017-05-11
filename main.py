@@ -27,7 +27,8 @@ TIMELINE:
     7. 11.5
 '''
 import time, argparse, cal_neuroIm
-from numpy import mean,ceil
+from numpy import mean,ceil, isnan, squeeze
+from IPython.core.tests.test_formatters import numpy
 #'/home/maximilian/unistuff/paris_ens/cal_neuroim/driftData/a5 KO anaesthetized mice data/2014.02.04 a5 cage 18/TSeries-02042014-1019-4562/Analysis/Results.xls'
 start_time = time.time() # get sys time to calculate runtime
  
@@ -55,6 +56,8 @@ for iterationNumber, filename in enumerate(args.inputFile):
     quantileMatrix = eventDetectObject[1]
     transientMatrix = eventDetectObject[0]
     meanKernel = cal_neuroIm.createMeanKernel(transientMatrix)
+    
+    apTimings,uselessValue = cal_neuroIm.importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/apTimings.csv',args.seperator,args.csv)
     #TODO: array containing only the transient data -> check negative transients first and filter!
     #ALSO: transient kernel is what excatly, where do we get it from? -> Alpha function which was fit over single peak transients
        
@@ -70,17 +73,20 @@ for iterationNumber, filename in enumerate(args.inputFile):
         f,(axarr0,axarr1,axarr2) = plt.subplots(3, sharex=True)
         eventCoordinates = [transientMatrix[i][j].getCoordinates() for j in range(len(transientMatrix[i]))] # ugly hack that defeats the purpose. REFACTOR
         spikeTrain = (cal_neuroIm.deconvolve(transientMatrix[i], meanKernel))
-        axarr2.plot(ceil(spikeTrain))
+        axarr2.plot((spikeTrain))
         axarr1.plot(baselineMatrix[:,i])
+        minVal = float(min(baselineMatrix[:,i]))
+        maxVal = float(max(baselineMatrix[:,i]))
+        for x in squeeze(apTimings[i]):
+            if ~isnan(x):
+                axarr1.plot([int(x),int(x)],[minVal,maxVal],'g--',lw=2)
         axarr0.plot(rawMatrix[:,i],"r")
         minVal = float(min(quantileMatrix[:,i]))
         thisMean2 = mean(baselineMatrix[:,i])
-        #minVal2 = float(min(baselineMatrix[:,i]))
-        #maxVal2 = float(max(baselineMatrix[:,i]))
         if(transientMatrix[i]): # is there a transient in this time series?
             for j in transientMatrix[i]: # yes, iterate over transient objects
                 coords = j.getCoordinates()
-                axarr0.plot(coords,[minVal,minVal],'r-', lw=2)
+                axarr0.plot(coords,[100,150],'k^', lw=2)
                 if ((coords[1]) != 0):
                     thisSlice = (j.getData())
                     #transientList.append(cal_neuroIm.Transient(thisSlice,j[0],j[1])) # call to transient kills 
