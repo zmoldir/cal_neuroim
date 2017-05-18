@@ -4,7 +4,7 @@ script contains methods used for main.py
 @author: maximilian
 '''
 from numpy import percentile,zeros,var, mean, arange, concatenate, savetxt, sign, ceil,\
-matrix, std, subtract, repeat, around, fft, divide, abs, ones, resize, exp, nditer
+matrix, std, subtract, repeat, around, fft, divide, abs, ones, resize, exp, nditer,trapz
 from sys import maxint
 from scipy.ndimage.filters import gaussian_filter
 from scipy.stats import norm
@@ -13,12 +13,17 @@ import pandas, xlrd, time
 from xlrd.biffh import XLRDError
 from math import sqrt
 from scipy.stats.stats import mode
-def importMatrix(filename,valSeperator,csvBool):
-    dataMatrix = [] # TODO: it's busted. Turn this into a proper pandas routine instead of some csv-reader BS
+
+def importMatrix(filename,valSeperator):
+    '''
+    imports csv or xls formatted file, returns ndArray 
+    @input: filename: input path; valSeperator: seperator between entries; csvBool: boolean to distinguish xlrd vs. csv files
+    @return: numOfVals: number of collumns in file (cells); dataMatrix: ndArray containing file data (dtype float)
+    '''
+    dataMatrix = []
     try:
-        if(csvBool):
-            frame = pandas.read_csv(filename)
-            
+        if(valSeperator):
+            frame = pandas.read_csv(filename,sep = valSeperator)
             for x in frame.values:
                 dataMatrix.append(x)
             numOfVals = x.size
@@ -35,9 +40,8 @@ def importMatrix(filename,valSeperator,csvBool):
     except IOError:
         print(str(filename) + " is not a valid file path !")
         exit()
-    rawMatrix = matrix(dataMatrix).A
-    del(dataMatrix)
-    return(rawMatrix, numOfVals)
+    dataMatrix = matrix(dataMatrix).A
+    return(dataMatrix, numOfVals)
 
 '''
 @param numOfVals: number of Values per row (e.g. ROIs)
@@ -61,6 +65,8 @@ def meanSlope(inArray):
 
 def eventDetect (dataMatrix, quantileWidth,slopeWidth):
     '''
+    TODO: clean up and turn into ndArray ? -> check if it is the bottleneck first!
+    
     @param dataMatrix: NxM matrix of the data containing transients and drift(possibly)
     @param windowSize: size of the window considered for the quantile normalization (none if q = 0)
     @param slopeWidth: size of the window considered for the calculation of slopes, critical parameter for event detection
@@ -177,11 +183,14 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
         #eventEndCoordinates.append(theseEventEndCoordinates[:])
         transients.append(theseTransients)
         collumn += shiftValue # shift of data to avoid negatives
-        #if (theseEventEndCoordinates):
+        #if (theseEventEndCoordinates):axarr2
             #collumn = discardNonEvent(collumn, theseEventEndCoordinates,baseLineArray[horizontalPosition])
     return (transients, correctionMatrix);
 
 def thresholdEventDetect(dataMatrix, quantileWidth, emptyplaceholder):
+    '''
+    alternative to eventDetect, uses a simple threshold (baseline mean + 5 standard deviations of baseline) for transient detection
+    '''
     numOfEntries = dataMatrix.shape[1]
     eventEndCoordinates = []
     numOfVals = len(dataMatrix)
@@ -220,7 +229,9 @@ def thresholdEventDetect(dataMatrix, quantileWidth, emptyplaceholder):
     return(dataMatrix,eventEndCoordinates,emptyplaceholder, correctionMatrix)
 
 def quantileCorrect (inputArray, eventCoordinates, windowSize):
-    '''
+    ''' 
+    DEPRECATED - non-transient data is ignored anyway, quantile correction is handled by eventDetect
+    takes input array and coordinates of transients, quantile corrects non-transient data 
     '''
     correctionArray = zeros(len(inputArray))
     if(len(eventCoordinates) == 0):
@@ -270,7 +281,7 @@ def quantileCorrect (inputArray, eventCoordinates, windowSize):
     return (inputArray,correctionArray);
 
 def quantileNorm (inputArray, eventCoordinates, windowSize):
-    ''' Alternative version of quantileCorrect which does not skip over events
+    ''' Alternative version of quantileCorrect which does not skip over events- not in use, eventDetect does this anyway
     '''
     if(len(eventCoordinates) == 0):
         return(inputArray)
@@ -293,61 +304,6 @@ def quantileNorm (inputArray, eventCoordinates, windowSize):
     return(inputArray,correctionArray);
 
 
-
-def arraySlopeCorrect4 (inputArray, coordinates,quantileWidth):
-    ''' takes an array of values and a list of start-end coordinates of events located on said array, which are then corrected using the base line drift
-    takes full transient quantile ... why?
-    @param inputArray: array with events to be corrected
-    @param coordinates: list of start / end coordinates of the events
-    @param correctionArray: place holder to keep track of performed corrections
-    @param baselineSlope: slope of the baseline used for corrections
-    @return inputArray with corrections, correctionArray of the same size to visualize corrections
-    '''
-    #returnArray = zeros(len(inputArray))
-    correctionArray = zeros(len(inputArray))
-    for x in (coordinates):
-        for i in range(x[1]-x[0]):
-            if (x[0] + i <= len(inputArray)):
-                correctionVal = percentile(inputArray[x[0]+i:x[0]+i+quantileWidth],q=8)
-                inputArray[x[0]+i] = inputArray[x[0]+i] - correctionVal
-                correctionArray[x[0]+i] = correctionVal
-            else:
-                correctionVal = percentile(inputArray[len(inputArray+1)-500:],q=8)
-            inputArray[x[0]+i] = inputArray[x[0]+i] - correctionVal
-            correctionArray[x[0]+i] = correctionVal
-    return(inputArray, correctionArray)
-
-def arraySlopecorrect (inputArray, coordinates, eventCorrectionValues, correctionArray):
-    '''
-    Modifies values by subtracting a line going from the starting value to the end value of the respective event, 
-    thus keeping the shape (unlike e.g. quantile normalization)
-    @param: inputArray array containing events to be corrected
-    @param: coordinates 2xN list containing the start and end coordinates of said events
-    @param: eventCorrectionValues events which overlap with the end or start of the array have to be corrected seperately using the values found
-            at their start (end of array) or end (start of array), respectively.
-    @return: array with corrected events
-    '''
-    for x in coordinates:
-        counter = 0
-        eventlen = x[1] - x[0]
-        thisTransient = inputArray[x[0]:x[1]]
-        slope = (thisTransient[-1]- thisTransient[0])/eventlen
-        diffArray = arange(thisTransient[0],thisTransient[-1],slope)
-        if(x[0] == 0):
-            inputArray[x[0]+1:x[1]] -=  eventCorrectionValues[counter]
-            correctionArray[x[0]+1:x[1]] = eventCorrectionValues[counter]
-            counter += 1
-            continue
-        if(x[1] == len(inputArray) -1):
-            inputArray[x[0]:x[1]+1] -=  eventCorrectionValues[counter]
-            correctionArray[x[0]:x[1]+1] = eventCorrectionValues[counter]
-            counter += 1
-            continue
-        for i in range(eventlen):
-            inputArray[x[0] + i] -= diffArray[i]
-            correctionArray[x[0] + i] = diffArray[i]
-    return(inputArray, correctionArray)
-
 def writeOut(data, fileName):
     '''
     Small method to print matrix with "meanN"- header, as found in the .cls files
@@ -358,20 +314,6 @@ def writeOut(data, fileName):
         headerString += 'mean' + str(i) + '\t'
     savetxt(fileName, data, fmt='%10.9f',delimiter="\t",header=headerString)
 
-def meanShiftCorrect(inputArray, eventCoordinates, windowSize):
-    '''
-    @param inputArray: array of data with events to be mean-shifted
-    @param eventCoordinates: array containing the starting points of the events to be corrected
-    @param windowSize size of the baseline whose mean will be used to calculate the size of the shift
-    @return array with the baseline-mean minus event min-shifted events 
-    '''
-    baseLineCoords = detectBaseline(inputArray, windowSize)[1]
-    baseMean = mean(inputArray[baseLineCoords:baseLineCoords+windowSize])
-    for x in eventCoordinates:
-        event = inputArray[x[0]:x[1]]
-        correctionValue =  abs(min(event)) - abs(baseMean)
-        inputArray[x[0]:x[1]] -= correctionValue#+= correctionValue
-    return(inputArray)
 
 def pushToBaseline (dataMatrix, bucketSize):
     '''
@@ -379,22 +321,14 @@ def pushToBaseline (dataMatrix, bucketSize):
     @param bucketSize: size of the baseline bins
     @return: baseline corrected version of the data, currently also expressed data in terms of sigma
     '''
-    numOfVals = dataMatrix.shape[1]
-    coordinates = zeros(2)
-    for i in range(0,numOfVals): # iterate over number of ROIs in file, e.g. collumn-wise
-        baselineObject = detectBaseline(dataMatrix[:,i], bucketSize)
-        coordinates[0] = baselineObject[1][0]
-        coordinates[1] = baselineObject[1][1]
-        baseLineArray = baselineObject[0]
+    coordList = []
+    for roi in nditer(dataMatrix,order='F',flags=['external_loop'],op_flags=['readwrite']): # iterate over number of ROIs in file, e.g. collumn-wise
+        baseLineArray, coordinates= detectBaseline(roi, bucketSize)
         meanVal = abs(mean(baseLineArray))
-        try:
-            dataMatrix[:,i] = (dataMatrix[:,i]-meanVal)/meanVal # baseline correction
-            dataMatrix[:,i] = dataMatrix[:,i]/(std(baseLineArray))
-        except ZeroDivisionError:
-            print(str(meanVal) + " at position: " + str(i))
-            exit()
-
-    return (dataMatrix,coordinates);
+        coordList.append(coordinates)
+        roi[...] = roi/meanVal # baseline correction
+            #dataMatrix[:,i] = dataMatrix[:,i]/(std(baseLineArray))
+    return (dataMatrix,coordList);
 
 def pushToBaseLine2(inputMatrix, baselineArray):
     numOfVals = inputMatrix.shape[1]
@@ -418,7 +352,7 @@ def detectBaseline (data, bucketSize):
     baselineArray = zeros(bucketSize)
     coordinate = []
     for j in range(0,int(numOfEntries-bucketSize)): # iterate over all possible bucket positions
-        thisStd = (axisStd(data[j:j+bucketSize])) # current deviation
+        thisStd = std(data[j:j+bucketSize])#(axisStd(data[j:j+bucketSize])) # current deviation
         if (thisStd < lowestSigma): # new min deviation found
             lowestSigma = thisStd
             coordinate = (j,j+bucketSize)
@@ -426,8 +360,10 @@ def detectBaseline (data, bucketSize):
     return(baselineArray, coordinate)
 
 def axisStd(inArray):
-    slopeArray = repeat(inArray[0],len(inArray))
-    thisStd = sqrt(mean(sum(subtract(inArray,slopeArray)**2)))
+    ''' takes an array and calculates the std along a 0-axis
+    TODO: bottleneck of the analysis! optimize.
+    '''
+    thisStd = mean(sqrt((inArray - inArray[0])**2))
     return (thisStd)
 
 def detectPeakline (data, bucketSize):
@@ -550,10 +486,8 @@ def createMeanKernel(transientMatrix):
     meanArray = meanArray / (divideArray)
     tVariable = arange(0,len(meanArray),1.)
     #tVariable.resize(meanArray.shape)
-    fitTime = time.time()
     popt, pcov = curve_fit(alphaKernel, tVariable,meanArray, p0=[80,100,50],maxfev=10000)
     plt.plot(tVariable, meanArray, label="meanArray")
-    plt.plot(divideArray)
     plt.plot(alphaKernel(tVariable, *popt), 'r-', label='fit')
     plt.savefig('alphaKernel.png')
     plt.close()
@@ -567,13 +501,44 @@ def deconvolve(transients, kernel):
     IDEA: using kernel (e.g. exp(-t/tau)), model corrected fluorescence observations as exp. decay with
     point-wise increase for each spike
     '''
-    spikeTrain = zeros(transients[0].getNumOfFrames())
+    spikeSignal = zeros(transients[0].getNumOfFrames())
     for i in (transients):
         transientData = i.getData()
         thisKernel = resize(kernel, transientData.shape)
         #spikeTrain = fft.ifft(fft.fft(transientData)/ fft.fft(transientKernel))# with ifft = inverse fast fourier transform and fft = fast fourier transform
-        spikeTrain[i.getStartTime():i.getEndTime()] = abs(fft.ifft(divide(fft.fft(transientData), fft.fft(thisKernel))))
+        spikeSignal[i.getStartTime():i.getEndTime()] = abs(fft.ifft(divide(fft.fft(transientData), fft.fft(thisKernel))))
+    return(spikeSignal)
+
+def generateSpiketrainFromSignal(spikeSignal):
+    #TODO: check if this and AUCdeconvolve work // see if the more recent version can be recovered ...
+    #also, figure out git you idiot
+    spikeTrain = zeros(spikeSignal.size)
+    spikeSignal = ceil(spikeSignal)
+    previousValue = 0
+    lastSpikePos = -100
+    
+    for pos,i in enumerate(spikeSignal):
+        if (i>previousValue and not pos - lastSpikePos < 100):
+            spikeTrain[pos] = 1
+            lastSpikePos = pos
+        previousValue = i
+        
     return(spikeTrain)
+
+
+def aucDeconvolve(transients, kernel):
+    '''TODO: this.
+    IDEA: using kernel (e.g. exp(-t/tau)), model corrected fluorescence observations as exp. decay with
+    point-wise increase for each spike
+    '''
+    kernelAUC = trapz(kernel)
+    spikeTrain = zeros(transients[0].getNumOfFrames())
+    for i in (transients):
+        transientAUC = trapz(i.getData())
+        #spikeTrain = fft.ifft(fft.fft(transientData)/ fft.fft(transientKernel))# with ifft = inverse fast fourier transform and fft = fast fourier transform
+        spikeTrain[i.getStartTime()] = ceil(transientAUC/kernelAUC)
+    return(spikeTrain)
+
 
 def generateOutput(rawMatrix, baseObject,tempData, filename, numOfVals):
     #ugly AF placeholder, refactor this so its flexible with input
