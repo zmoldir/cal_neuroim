@@ -4,15 +4,15 @@ script contains methods used for main.py
 @author: maximilian
 '''
 from numpy import percentile,zeros,var, mean, arange, concatenate, savetxt, sign, ceil,\
-matrix, std, subtract, repeat, around, fft, divide, abs, ones, resize, exp, nditer,trapz
+matrix, std, around, fft, divide, abs, ones, resize, exp, nditer,trapz, argmax
 from sys import maxint
 from scipy.ndimage.filters import gaussian_filter
 from scipy.stats import norm
 from scipy.optimize import curve_fit
 import pandas, xlrd, time
 from xlrd.biffh import XLRDError
-from math import sqrt
 from scipy.stats.stats import mode
+from _ast import operator
 
 def importMatrix(filename,valSeperator):
     '''
@@ -51,8 +51,8 @@ actually yields one entry less than numOfVals - ImageJ result.xls file headers s
 TODO: this looks extremely un-pythonic and stupid ... what am I using it for again?'''
 def getValues (row):
     thisRow = []
-    for i in range(0,len(row)):
-        thisRow.append(float(row[i].value))
+    for i in row:
+        thisRow.append(float(i.value))
     return thisRow;
 
 def meanSlope(inArray):
@@ -85,10 +85,10 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
     minEventLength = 30 # minimum length of events
     delList = []
     correctionMatrix = zeros([numOfEntries,numOfVals])
+    
     # here we generate a global noise / slope threshold for all ROIs of the file
-    for num,collumn in enumerate(dataMatrix.T): 
+    for collumn in nditer(dataMatrix, order='F',flags=['external_loop'],op_flags=['readonly']): 
         slopeList = zeros(numOfEntries - slopeWidth)
-        collumn = collumn.T
         #slopeThreshold += abs(meanSlope(detectPeakline(collumn, slopeWidth)[0])) # threshold to be passed for start of significance
         for i in range(len(slopeList)):
             slopeList[i]= (meanSlope(collumn[i:i+slopeWidth]))  # threshold to be passed for start of significance
@@ -346,25 +346,19 @@ def detectBaseline (data, bucketSize):
     @param data: the array out of which the region with the lowest noise is to be identified
     @param bucketSize: size of the bins to be checked
     @return: bin with the lowest noise and its starting coordinate, in a tuple
+    TODO: change baseline detection to only try every 10th position -> small loss of acc for massive gain in speed
     '''
     numOfEntries = len(data)
     lowestSigma = maxint # for size comparasion
     baselineArray = zeros(bucketSize)
     coordinate = []
-    for j in range(0,int(numOfEntries-bucketSize)): # iterate over all possible bucket positions
+    for j in range(0,int(numOfEntries-bucketSize),int(numOfEntries/(bucketSize*2))): # iterate over 1 out of 10 bucket positions
         thisStd = std(data[j:j+bucketSize])#(axisStd(data[j:j+bucketSize])) # current deviation
         if (thisStd < lowestSigma): # new min deviation found
             lowestSigma = thisStd
             coordinate = (j,j+bucketSize)
         baselineArray = data[coordinate[0]:coordinate[1]]
     return(baselineArray, coordinate)
-
-def axisStd(inArray):
-    ''' takes an array and calculates the std along a 0-axis
-    TODO: bottleneck of the analysis! optimize.
-    '''
-    thisStd = mean(sqrt((inArray - inArray[0])**2))
-    return (thisStd)
 
 def detectPeakline (data, bucketSize):
     '''
@@ -386,13 +380,8 @@ def detectPeakline (data, bucketSize):
     return(peaklineArray,coordinate)
 
 def maxAmp(inputData):
-    maxVal = -maxint
-    maxPosition = 0
-    for position, value in enumerate(inputData):
-        if (value > maxVal):
-            maxVal = float(value)
-            maxPosition = position 
-    return(maxVal, maxPosition);
+    max_index = argmax(inputData)
+    return(inputData[max_index], max_index);
 
 def detectNumOfPeaks(data):
     if(len(data) <2):
@@ -425,17 +414,12 @@ def getSinglePeakTransient(transients):
 
 def createMeanKernel(transientMatrix):
     #Function is called for one ROI, iterates over the transients. Problem: requires information from ALL ROI's and transients for computation.
-    risetimeArray = []
-    decaytimeArray = []
-    amplitudeArray = []
+
+    singlePeakArray = [i for j in transientMatrix for i in j if i.getNumOfPeaks()==1 ]
+    risetimeArray = [i.getRiseTime() for i in singlePeakArray]
+    decaytimeArray = [i.getDecayTime() for i in singlePeakArray]
+    amplitudeArray = [i.getAmplitude() for i in singlePeakArray]
     
-    for transients in transientMatrix: # go over cells
-        for i in transients: # go over ROIs
-            if (i.getNumOfPeaks() == 1): # select 1-peak entries
-                risetimeArray.append(i.getRiseTime())
-                decaytimeArray.append(i.getDecayTime())
-                amplitudeArray.append(i.getAmplitude())
-                            
     risetimeStd = std(risetimeArray)
     risetimeMean = mean(risetimeArray)
     decaytimeStd = std(decaytimeArray)
@@ -455,28 +439,26 @@ def createMeanKernel(transientMatrix):
     divideArray = zeros(transientMatrix[0][0].getNumOfFrames(),dtype=int)
     constrainRelaxVariable = 1
     while (not meanArray.any()):
-        for transients in transientMatrix: # go over cells
-            for i in transients: # go over ROIs
-                if(i.getNumOfPeaks() == 1):
-                    if (i.getNumOfPeaks() == 1 and amplitudeThreshDown/constrainRelaxVariable < i.getAmplitude() < amplitudeThreshUp*constrainRelaxVariable and 
-                        decaytimeThreshDown/constrainRelaxVariable < i.getDecayTime() < decaytimeThreshUp*constrainRelaxVariable and 
-                        risetimeThreshDown/constrainRelaxVariable < i.getRiseTime() < risetimeThreshUp*constrainRelaxVariable): # we already know which ones are the single peak transients, but re-checking is cheaper than a new array
-                        
-                        currentTransient = i.getData()
-                        plt.plot(currentTransient,"grey",alpha=0.2)
-                        if(len(currentTransient)>len(meanArray)):
-                            meanArray.resize(currentTransient.shape)
-                            tempArray = ones(currentTransient.shape,dtype=int)
-                            tempArray.resize(divideArray.shape,refcheck=False)
-                            divideArray += tempArray  
-                            meanArray += currentTransient
-                        else:
-                            tempArray = ones(currentTransient.shape,dtype=int)
-                            tempArray.resize(divideArray.shape)
-                            divideArray += tempArray
-                            zerosArray = zeros(len(meanArray)-len(currentTransient))
-                            currentTransient = concatenate((currentTransient,zerosArray))
-                            meanArray += currentTransient
+        for i in singlePeakArray: # go over ROIs
+            if (i.getNumOfPeaks() == 1 and amplitudeThreshDown/constrainRelaxVariable < i.getAmplitude() < amplitudeThreshUp*constrainRelaxVariable and 
+                    decaytimeThreshDown/constrainRelaxVariable < i.getDecayTime() < decaytimeThreshUp*constrainRelaxVariable and 
+                    risetimeThreshDown/constrainRelaxVariable < i.getRiseTime() < risetimeThreshUp*constrainRelaxVariable): # we already know which ones are the single peak transients, but re-checking is cheaper than a new array
+                    
+                    currentTransient = i.getData()
+                    plt.plot(currentTransient,"grey",alpha=0.2)
+                    if(len(currentTransient)>len(meanArray)):
+                        meanArray.resize(currentTransient.shape)
+                        tempArray = ones(currentTransient.shape,dtype=int)
+                        tempArray.resize(divideArray.shape,refcheck=False)
+                        divideArray += tempArray  
+                        meanArray += currentTransient
+                    else:
+                        tempArray = ones(currentTransient.shape,dtype=int)
+                        tempArray.resize(divideArray.shape)
+                        divideArray += tempArray
+                        zerosArray = zeros(len(meanArray)-len(currentTransient))
+                        currentTransient = concatenate((currentTransient,zerosArray))
+                        meanArray += currentTransient
         if (not meanArray.any()):
             print "No single peak transients within 2 amplitude/ rise time/ decay time standard deviations of each other found!\nRelaxing constraints by 50% for deconvolution"
             constrainRelaxVariable += 0.5

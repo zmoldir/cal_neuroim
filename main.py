@@ -3,7 +3,7 @@ Created on Sep 30, 2016
 @author: Maximilian Pfeiffer
 @argv: filename, -seperator: file to be opened and unicode string seperating data entries, respectively.
 @argv: quantileWidth, baselineWidth: size of buckets to be scanned for the baseline / quantiles, respectively.
-TODO: clean up of code! Output should be generated in one call
+
     general process outline:
     
     1. finish deconvolution
@@ -44,26 +44,33 @@ for filename in args.inputFile:
     
     rawMatrix, numOfVals = cal_neuroIm.importMatrix(filename,args.seperator)
     print("on file:" + str(filename) + " with " + str(numOfVals) + " ROIs")
-    
+    time1 = time.time()
     baselineMatrix, baselineCoordinates = cal_neuroIm.pushToBaseline(rawMatrix,args.b)
-
+    print ("time for baseline norm: %f") % (time.time() - time1)
+    time1 = time.time()
+    
     transientMatrix, quantileMatrix = cal_neuroIm.eventDetect(baselineMatrix, args.q,len(rawMatrix)/150)
+    print ("time for event detection: %f") % (time.time() - time1)
     
+    time1 = time.time()
     meanKernel = cal_neuroIm.createMeanKernel(transientMatrix)
-    
+    print ("time for mean kernel calculation: %f") % (time.time() - time1)
     #apTimings,uselessValue = cal_neuroIm.importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/apTimings.csv',args.seperator,args.csv)
     #TODO: array containing only the transient data -> check negative transients first and filter!
-    
+    decontime = 0
+    time2 = time.time()
     for i in range(numOfVals):
         import matplotlib.pyplot as plt
         f,(axarr0,axarr1,axarr2) = plt.subplots(3, sharex=True)
         eventCoordinates = [j.getCoordinates() for j in transientMatrix[i]] # ugly hack that defeats the purpose. REFACTOR
+        time1 = time.time()
         spikeSignal = cal_neuroIm.deconvolve(transientMatrix[i], meanKernel)
         spikeTrain = cal_neuroIm.generateSpiketrainFromSignal(spikeSignal)
+        
         axarr2.plot(spikeTrain)
         
         axarr2.plot(cal_neuroIm.aucDeconvolve(transientMatrix[i], meanKernel),'^g')
-        
+        decontime += (time.time() - time1)
         plt.grid()
         axarr1.plot(spikeSignal)
         '''
@@ -91,6 +98,6 @@ for filename in args.inputFile:
         print(str(args.outputFilePath) +"output" +  str(filename).split('\\')[-1] + " is not a valid file path for output!")
         exit()
         '''
-    
+print("decon time: %f vs. total plotting loop time: %f" % (decontime,time.time() - time2))
 print("--- %s seconds ---" % (time.time() - start_time))
 
