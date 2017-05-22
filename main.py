@@ -46,48 +46,46 @@ for filename in args.inputFile:
     print("on file:" + str(filename) + " with " + str(numOfVals) + " ROIs")
     time1 = time.time()
     baselineMatrix, baselineCoordinates = cal_neuroIm.pushToBaseline(rawMatrix,args.b)
-    print ("time for baseline norm: %f") % (time.time() - time1)
-    time1 = time.time()
-    
-    transientMatrix, quantileMatrix = cal_neuroIm.eventDetect(baselineMatrix, args.q,len(rawMatrix)/150)
-    print ("time for event detection: %f") % (time.time() - time1)
+    transientMatrix, quantileMatrix, slopeDistributions = cal_neuroIm.eventDetect(baselineMatrix, args.q,len(rawMatrix)/150)
     
     time1 = time.time()
     meanKernel = cal_neuroIm.createMeanKernel(transientMatrix)
     print ("time for mean kernel calculation: %f") % (time.time() - time1)
-    #apTimings,uselessValue = cal_neuroIm.importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/apTimings.csv',args.seperator,args.csv)
+    apTimings,uselessValue = cal_neuroIm.importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/apTimings.csv',args.seperator)
     #TODO: array containing only the transient data -> check negative transients first and filter!
+    #ALSO: plot slope distribution, pack decon techniques into one picture -> where should cutoff be?
     decontime = 0
     time2 = time.time()
     for i in range(numOfVals):
         import matplotlib.pyplot as plt
-        f,(axarr0,axarr1,axarr2) = plt.subplots(3, sharex=True)
+        f,(axarr0,axarr1,axarr2) = plt.subplots(3, sharex=False)
         eventCoordinates = [j.getCoordinates() for j in transientMatrix[i]] # ugly hack that defeats the purpose. REFACTOR
         time1 = time.time()
         spikeSignal = cal_neuroIm.deconvolve(transientMatrix[i], meanKernel)
         spikeTrain = cal_neuroIm.generateSpiketrainFromSignal(spikeSignal)
-        
-        axarr2.plot(spikeTrain)
-        
-        axarr2.plot(cal_neuroIm.aucDeconvolve(transientMatrix[i], meanKernel),'^g')
+        axarr2.hist(slopeDistributions[i][2], 100, normed=1, facecolor='green', alpha=0.75)
+        axarr2.plot(slopeDistributions[i][0],slopeDistributions[i][1],'r--', linewidth=2)
+        axarr2.plot([slopeDistributions[i][3],slopeDistributions[i][3]],[0,50],'k--',lw=3)
+        aucTrain = cal_neuroIm.aucDeconvolve(transientMatrix[i], meanKernel)
         decontime += (time.time() - time1)
         plt.grid()
-        axarr1.plot(spikeSignal)
-        '''
+        axarr1.plot(spikeSignal,'b.')
+        #axarr1.plot(aucTrain,'^g')
+        #axarr1.plot(spikeTrain,'r-')
+        axarr0.plot(rawMatrix[:,i],"r")
+
         for x in squeeze(apTimings[i]):
             if ~isnan(x):
-                axarr1.plot([int(x),int(x)],[0,5],'g--',lw=2)
-        '''
-        axarr0.plot(rawMatrix[:,i],"r")
+                axarr1.plot([int(x),int(x)],[0,0.5],'g--',lw=2)
         thisMean2 = mean(baselineMatrix[:,i])
         if(transientMatrix[i]): # is there a transient in this time series?
             for j in transientMatrix[i]: # yes, iterate over transient objects
                 coords = j.getCoordinates()
-                axarr0.plot(coords,[0,max(j.getData())],'k^', lw=2)
+                axarr0.plot(coords,[1,max(j.getData())],'k^', lw=2)
         axarr0.plot(baselineCoordinates[i],[thisMean2,thisMean2],'k.',lw=1)
         plt.savefig(str(filename) + str(i)+".png")
         plt.close()
-    '''try:    
+    '''try:
         with open(str(args.outputFilePath) + str(filename).split('/')[-1] + ".csv", 'w') as outFile:
             outFile.write("Amplitude\tRiseTime\tDecayTime\tmeanIntensity\ttotalLength\tnumOfPeaks\tstartTime\tendTime\n")    
             for num,t in enumerate(transientList):

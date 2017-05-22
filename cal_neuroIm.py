@@ -4,7 +4,8 @@ script contains methods used for main.py
 @author: maximilian
 '''
 from numpy import percentile,zeros,var, mean, arange, concatenate, savetxt, sign, ceil,\
-matrix, std, around, fft, divide, abs, ones, resize, exp, nditer,trapz, argmax
+matrix, std, around, fft, divide, abs, ones, resize, exp, nditer,trapz, argmax,\
+    append
 from sys import maxint
 from scipy.ndimage.filters import gaussian_filter
 from scipy.stats import norm
@@ -83,7 +84,8 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
     startNumOfHits = 2 # number of slope-hits to be made before an event is declared as beginning
     stopNumOfHits = 2
     minEventLength = 30 # minimum length of events
-    delList = []
+    thresholdList = []
+    slopeDistributions = []
     correctionMatrix = zeros([numOfEntries,numOfVals])
     
     # here we generate a global noise / slope threshold for all ROIs of the file
@@ -101,26 +103,28 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
         
         mu, sigma = norm.fit(slopeList2)
         # the histogram of the data
-        delList.append(sigma*2) #TODO don't store this in delList
-        '''
+        thresholdList.append(sigma*2) 
         import matplotlib.pyplot as plt
         import matplotlib.mlab as mlab
         n, bins, patches = plt.hist(slopeList, 100, normed=1, facecolor='green', alpha=0.75)
         y = mlab.normpdf( bins, mu, sigma)
-        plt.plot(bins, y, 'r--', linewidth=2)
-        plt.plot([sigma*2,sigma*2],[0,5],'k--')
+        slopeDistributions.append((bins,y,slopeList,sigma*2))
+        #plt.plot(bins, y, 'r--', linewidth=2)
+        #plt.plot([sigma*2,sigma*2],[0,5],'k--')
         #plot
+        '''
         plt.title(r'$\mathrm{test:}\ \mu=%.3f,\ \sigma=%.3f,\ thisMode=%.3f$' %(mu, sigma,thisMode))
         plt.grid(True)
         plt.savefig("Slope_distrib_" + str(num)+".png")
-        plt.close()'''
+        plt.close()
+        '''
         #noiseThreshold += (var(detectBaseline(collumn, baselineWidth)[0])) # threshold to be passed for end of significance
     #slopeThreshold = slopeThreshold/numOfVals
     # re-iterate over the data ROI-wise for determination of event positions - in reverse order because we delete skipped rows immediately
     for horizontalPosition, collumn in enumerate(dataMatrix.T): # generate local noise / slope threshold and consider if we should skip
         
         collumn = collumn.T # looks stupid but makes the general code more pythonic (instead of referencing collumns via slicing)
-        thisSlopeThreshold = delList[horizontalPosition]# threshold to be passed for start of significance 
+        thisSlopeThreshold = thresholdList[horizontalPosition]# threshold to be passed for start of significance 
         isEvent = False # bool to remember wether we are in event-mode
         eventStart = 0
         eventEnd = 0
@@ -185,7 +189,7 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
         collumn += shiftValue # shift of data to avoid negatives
         #if (theseEventEndCoordinates):axarr2
             #collumn = discardNonEvent(collumn, theseEventEndCoordinates,baseLineArray[horizontalPosition])
-    return (transients, correctionMatrix);
+    return (transients, correctionMatrix,slopeDistributions);
 
 def thresholdEventDetect(dataMatrix, quantileWidth, emptyplaceholder):
     '''
@@ -486,9 +490,13 @@ def deconvolve(transients, kernel):
     spikeSignal = zeros(transients[0].getNumOfFrames())
     for i in (transients):
         transientData = i.getData()
-        thisKernel = resize(kernel, transientData.shape)
+        
+        if transientData.size > kernel.size:
+            thisKernel = append(kernel,zeros(transientData.size-kernel.size))
+        else:
+            thisKernel = resize(kernel,transientData.shape)
         #spikeTrain = fft.ifft(fft.fft(transientData)/ fft.fft(transientKernel))# with ifft = inverse fast fourier transform and fft = fast fourier transform
-        spikeSignal[i.getStartTime():i.getEndTime()] = abs(fft.ifft(divide(fft.fft(transientData), fft.fft(thisKernel))))
+        spikeSignal[i.getStartTime()] = sum(fft.ifft(divide(fft.fft(transientData), fft.fft(thisKernel))))
     return(spikeSignal)
 
 def generateSpiketrainFromSignal(spikeSignal):
