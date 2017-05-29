@@ -6,14 +6,6 @@ Created on Sep 30, 2016
 
     general process outline:
     
-    1. finish deconvolution
-    2. generation of plots / transient property files into seperate functions, as well as INPUT
-    3. All normalization / correction methods shouldn't take more input than necessary and have defaults
-    4. 2 & 3 should collapse main.py to an overseeable format! -> if not: rinse & repeat
-    5. COMPARE PERFORMANCES
-        -how fast is it compared to alternatives, OPTIMIZE
-        -how close is the result? OPTIMIZE
-    6. Put methods in a library-esque format
     7. Documentation! 
         - README for the done script
         - explanation for methods
@@ -50,7 +42,7 @@ for filename in args.inputFile:
     
     time1 = time.time()
     meanKernel = cal_neuroIm.createMeanKernel(transientMatrix)
-    print ("time for mean kernel calculation: %f") % (time.time() - time1)
+    #print ("time for mean kernel calculation: %f") % (time.time() - time1)
     apTimings,uselessValue = cal_neuroIm.importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/apTimings.csv',args.seperator)
     #TODO: array containing only the transient data -> check negative transients first and filter!
     #ALSO: plot slope distribution, pack decon techniques into one picture -> where should cutoff be?
@@ -68,15 +60,16 @@ for filename in args.inputFile:
         axarr2.plot([slopeDistributions[i][3],slopeDistributions[i][3]],[0,50],'k--',lw=3)
         aucTrain = cal_neuroIm.aucDeconvolve(transientMatrix[i], meanKernel)
         decontime += (time.time() - time1)
-        plt.grid()
-        axarr1.plot(spikeSignal,'b.')
-        #axarr1.plot(aucTrain,'^g')
-        #axarr1.plot(spikeTrain,'r-')
+        axarr1.plot(spikeSignal,'b')
+        axarr1.plot(aucTrain,'^g')
+        plt.grid(True)
+        axarr1.plot(spikeTrain,'r-')
         axarr0.plot(rawMatrix[:,i],"r")
-
+    
         for x in squeeze(apTimings[i]):
             if ~isnan(x):
-                axarr1.plot([int(x),int(x)],[0,0.5],'g--',lw=2)
+                axarr1.plot([int(x),int(x)],[0,1],'g--',lw=2)
+        
         thisMean2 = mean(baselineMatrix[:,i])
         if(transientMatrix[i]): # is there a transient in this time series?
             for j in transientMatrix[i]: # yes, iterate over transient objects
@@ -96,6 +89,6 @@ for filename in args.inputFile:
         print(str(args.outputFilePath) +"output" +  str(filename).split('\\')[-1] + " is not a valid file path for output!")
         exit()
         '''
-print("decon time: %f vs. total plotting loop time: %f" % (decontime,time.time() - time2))
+#print("decon time: %f vs. total plotting loop time: %f" % (decontime,time.time() - time2))
 print("--- %s seconds ---" % (time.time() - start_time))
 

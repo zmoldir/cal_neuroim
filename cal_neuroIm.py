@@ -5,7 +5,7 @@ script contains methods used for main.py
 '''
 from numpy import percentile,zeros,var, mean, arange, concatenate, savetxt, sign, ceil,\
 matrix, std, around, fft, divide, abs, ones, resize, exp, nditer,trapz, argmax,\
-    append
+    append, sum
 from sys import maxint
 from scipy.ndimage.filters import gaussian_filter
 from scipy.stats import norm
@@ -13,12 +13,11 @@ from scipy.optimize import curve_fit
 import pandas, xlrd, time
 from xlrd.biffh import XLRDError
 from scipy.stats.stats import mode
-from _ast import operator
 
 def importMatrix(filename,valSeperator):
     '''
     imports csv or xls formatted file, returns ndArray 
-    @input: filename: input path; valSeperator: seperator between entries; csvBool: boolean to distinguish xlrd vs. csv files
+    @input: filename: input path; valSeperator: seperator between entries, treats file as xlrd if none
     @return: numOfVals: number of collumns in file (cells); dataMatrix: ndArray containing file data (dtype float)
     '''
     dataMatrix = []
@@ -81,8 +80,8 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
     transients = [] # global list for lists of transients
     numOfVals = dataMatrix.shape[1] # number of ROIs in file
     numOfEntries = len(dataMatrix) # number of entries in file
-    startNumOfHits = 2 # number of slope-hits to be made before an event is declared as beginning
-    stopNumOfHits = 2
+    startNumOfHits = 5 # number of slope-hits to be made before an event is declared as beginning
+    stopNumOfHits = 1
     minEventLength = 30 # minimum length of events
     thresholdList = []
     slopeDistributions = []
@@ -109,6 +108,8 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
         n, bins, patches = plt.hist(slopeList, 100, normed=1, facecolor='green', alpha=0.75)
         y = mlab.normpdf( bins, mu, sigma)
         slopeDistributions.append((bins,y,slopeList,sigma*2))
+        plt.close()
+        
         #plt.plot(bins, y, 'r--', linewidth=2)
         #plt.plot([sigma*2,sigma*2],[0,5],'k--')
         #plot
@@ -330,7 +331,7 @@ def pushToBaseline (dataMatrix, bucketSize):
         baseLineArray, coordinates= detectBaseline(roi, bucketSize)
         meanVal = abs(mean(baseLineArray))
         coordList.append(coordinates)
-        roi[...] = roi/meanVal # baseline correction
+        roi[...] = roi/meanVal -1 # baseline correction 
             #dataMatrix[:,i] = dataMatrix[:,i]/(std(baseLineArray))
     return (dataMatrix,coordList);
 
@@ -350,7 +351,6 @@ def detectBaseline (data, bucketSize):
     @param data: the array out of which the region with the lowest noise is to be identified
     @param bucketSize: size of the bins to be checked
     @return: bin with the lowest noise and its starting coordinate, in a tuple
-    TODO: change baseline detection to only try every 10th position -> small loss of acc for massive gain in speed
     '''
     numOfEntries = len(data)
     lowestSigma = maxint # for size comparasion
@@ -433,9 +433,9 @@ def createMeanKernel(transientMatrix):
     risetimeThreshUp = risetimeStd*2 + risetimeMean
     decaytimeThreshUp = decaytimeStd*2 + decaytimeMean 
     amplitudeThreshUp = amplitudeStd*2 + amplitudeMean
-    risetimeThreshDown = risetimeStd*2 - risetimeMean
-    decaytimeThreshDown = decaytimeStd*2 - decaytimeMean 
-    amplitudeThreshDown = amplitudeStd*2 - amplitudeMean
+    risetimeThreshDown =  risetimeMean - risetimeStd
+    decaytimeThreshDown = decaytimeMean - decaytimeStd  
+    amplitudeThreshDown =  amplitudeMean -amplitudeStd*2 
     print ("amp: %f\t%f\nRT: %f\t%f \nDT: %f\t%f" % (amplitudeThreshDown,amplitudeThreshUp,risetimeThreshDown,risetimeThreshUp,decaytimeThreshDown,decaytimeThreshUp))
     # block below: mean transients falling within 2 STD of 1 peak transient mean
     import matplotlib.pyplot as plt
@@ -477,16 +477,18 @@ def createMeanKernel(transientMatrix):
     plt.plot(alphaKernel(tVariable, *popt), 'r-', label='fit')
     plt.savefig('alphaKernel.png')
     plt.close()
-    return(alphaKernel(tVariable,*popt))
+    return(alphaKernel(arange(i.getNumOfFrames()),*popt))
 
 def alphaKernel (t, A,t_A,t_B):
     return A*(exp(-t/t_A)-exp(-t/t_B))
 
 def deconvolve(transients, kernel):
-    '''TODO: this.
+    '''
     IDEA: using kernel (e.g. exp(-t/tau)), model corrected fluorescence observations as exp. decay with
     point-wise increase for each spike
     '''
+    if (not transients):
+        return(zeros(kernel.size))
     spikeSignal = zeros(transients[0].getNumOfFrames())
     for i in (transients):
         transientData = i.getData()
@@ -496,30 +498,26 @@ def deconvolve(transients, kernel):
         else:
             thisKernel = resize(kernel,transientData.shape)
         #spikeTrain = fft.ifft(fft.fft(transientData)/ fft.fft(transientKernel))# with ifft = inverse fast fourier transform and fft = fast fourier transform
-        spikeSignal[i.getStartTime()] = sum(fft.ifft(divide(fft.fft(transientData), fft.fft(thisKernel))))
+        spikeSignal[i.getStartTime():i.getEndTime()] = (fft.ifft(divide(fft.fft(transientData), fft.fft(thisKernel))))
+        spikeSignal[i.getStartTime():i.getEndTime()] = generateSpiketrainFromSignal(spikeSignal[i.getStartTime():i.getEndTime()])
     return(spikeSignal)
 
 def generateSpiketrainFromSignal(spikeSignal):
-    #TODO: check if this and AUCdeconvolve work // see if the more recent version can be recovered ...
-    #also, figure out git you idiot
-    spikeTrain = zeros(spikeSignal.size)
-    spikeSignal = ceil(spikeSignal)
-    previousValue = 0
-    lastSpikePos = -100
+    #TODO: change method so it assignes ceil(sum(spikeSignal)) amount of APs to peaks of deconvo signal
     
-    for pos,i in enumerate(spikeSignal):
-        if (i>previousValue and not pos - lastSpikePos < 100):
-            spikeTrain[pos] = 1
-            lastSpikePos = pos
-        previousValue = i
+    spikeTrain = zeros(spikeSignal.size)
+    numOfSpikes = ceil(sum(spikeSignal))
+    for i in arange(numOfSpikes):
+        maxVal = argmax(spikeSignal)
+        spikeTrain[maxVal] = 1
+        spikeSignal[maxVal] = 0
         
     return(spikeTrain)
 
 
 def aucDeconvolve(transients, kernel):
-    '''TODO: this.
-    IDEA: using kernel (e.g. exp(-t/tau)), model corrected fluorescence observations as exp. decay with
-    point-wise increase for each spike
+    '''
+    naive approach, less accurate for overlapping activity
     '''
     kernelAUC = trapz(kernel)
     spikeTrain = zeros(transients[0].getNumOfFrames())
