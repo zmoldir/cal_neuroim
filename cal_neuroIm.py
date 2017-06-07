@@ -5,7 +5,7 @@ script contains methods used for main.py
 '''
 from numpy import percentile,zeros,var, mean, arange, concatenate, savetxt, sign, ceil,\
 matrix, std, around, fft, divide, abs, ones, resize, exp, nditer,trapz, argmax,\
-    append, sum
+    append, sum, argmin
 from sys import maxint
 from scipy.ndimage.filters import gaussian_filter
 from scipy.stats import norm
@@ -40,7 +40,8 @@ def importMatrix(filename,valSeperator):
     except IOError:
         print(str(filename) + " is not a valid file path !")
         exit()
-    dataMatrix = matrix(dataMatrix).A
+    from numpy import matrix as m
+    dataMatrix = m(dataMatrix).A
     return(dataMatrix, numOfVals)
 
 '''
@@ -81,7 +82,6 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
     numOfVals = dataMatrix.shape[1] # number of ROIs in file
     numOfEntries = len(dataMatrix) # number of entries in file
     startNumOfHits = 5 # number of slope-hits to be made before an event is declared as beginning
-    stopNumOfHits = 1
     minEventLength = 30 # minimum length of events
     thresholdList = []
     slopeDistributions = []
@@ -160,20 +160,16 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
                         eventStart = verticalPosition - startNumOfHits +1
                         eventEnd = verticalPosition
                         isEvent = True
-                        noiseHit = 0
-
+    
             else: 
                 # we are in an event!
                 eventEnd += 1
                 # does it end?
                 if (collumn[eventStart] > collumn[verticalPosition]): # check if it ends
-                    noiseHit += 1
-                    if(noiseHit >= stopNumOfHits):
-                        isEvent = False
-                        threshHit = 0
-                        if(eventEnd-eventStart > minEventLength):
-                            #theseEventEndCoordinates.append([eventStart,eventEnd])
-                            theseTransients.append(Transient(collumn[eventStart:eventEnd],eventStart,eventEnd,numOfEntries))
+                    isEvent = False
+                    threshHit = 0
+                    if(eventEnd-eventStart > minEventLength):
+                        theseTransients.append(Transient(collumn[eventStart:eventEnd],eventStart,eventEnd,numOfEntries))
             
         if(isEvent):
             # event lasted until end of the data, correct the last bit
@@ -514,73 +510,29 @@ def generateSpiketrainFromSignal(spikeSignal):
         
     return(spikeTrain)
 
+def negativeTransientsCorrect(transients):
+    #TODO: this.
+    numOfNeg = 0
+    meanTrans = ()
+    for i in transients:
+        meanTrans.append(mean(i.getData))
+        if mean(i.getData)< 0:
+            numOfNeg += 1
+    for j in range(numOfNeg):
+        transients.remove(argmin(meanTrans))
+    return(transients)
 
-def aucDeconvolve(transients, kernel):
+def aucCorrect(transients, kernel):
     '''
     naive approach, less accurate for overlapping activity
     '''
     kernelAUC = trapz(kernel)
-    spikeTrain = zeros(transients[0].getNumOfFrames())
     for i in (transients):
         transientAUC = trapz(i.getData())
         #spikeTrain = fft.ifft(fft.fft(transientData)/ fft.fft(transientKernel))# with ifft = inverse fast fourier transform and fft = fast fourier transform
-        spikeTrain[i.getStartTime()] = ceil(transientAUC/kernelAUC)
-    return(spikeTrain)
-
-
-def generateOutput(rawMatrix, baseObject,tempData, filename, numOfVals):
-    #ugly AF placeholder, refactor this so its flexible with input
-    transientData = []
-    baselineMatrix = baseObject[0]
-    baselineCoordinates = baseObject[1]
-    eventCoordinates = tempData[1]
-    quantileMatrix = matrix(tempData[0])
-    correctionMatrix = tempData[3]
-    
-    import matplotlib.pyplot as plt
-    #for j in range(numOfVals):
-    #    plt.hist(delList[j], bins=100)
-    #    plt.show()
-    #    plt.close()
-    #TODO: extract this crap into a function
-    for i in range(numOfVals):
-        f,(axarr0,axarr1,axarr2) = plt.subplots(3, sharex=True)
-        axarr1.plot(quantileMatrix[:,i])
-        axarr1.plot(correctionMatrix[:,i])
-        axarr0.plot(rawMatrix[:,i],"r")
-        thisMean = mean(quantileMatrix[:,i])
-        minVal = float(min(quantileMatrix[:,i]))
-        minVal2 = float(min(baselineMatrix[:,i]))
-        maxVal2 = float(max(baselineMatrix[:,i]))
-        if(eventCoordinates[i]):
-            for j in eventCoordinates[i]:
-                axarr1.plot(j,[minVal,minVal],'r-', lw=1)
-                if ((j[1]) != 0):
-                    #transientList.append(cal_neuroIm.Transient(thisSlice,j[0],j[1])) # call to transient kills 
-                    axarr1.plot([j[0],j[0]],[minVal2,maxVal2],'r-', lw=1)
-                    axarr2.plot([j[1],j[1]],[minVal2,maxVal2],'k-', lw=1)
-                    #axarr2.annotate(str(transientList[-1].getStartTime()), xy=(j[0],transientList[-1].getNumOfPeaks()))
-            #transientList[-1].setIsLast()
-        #cal_neuroIm.getSinglePeakTransient(transientList)
-        axarr2.plot(baselineMatrix[:,i])
-        axarr1.plot([baselineCoordinates[i][0],baselineCoordinates[i][1]],[thisMean,thisMean],'k-',lw=1)
-        axarr1.plot([baselineCoordinates[i][0],baselineCoordinates[i][0]],[minVal2,maxVal2],'k-', lw=1)
-        axarr1.plot([baselineCoordinates[i][1],baselineCoordinates[i][1]],[minVal2,maxVal2],'k-', lw=1)
-        plt.savefig(str(filename) + str(i)+".png")
-        plt.close()
-    try:    
-        with open(str(filename) + str(filename).split('/')[-1] + ".csv", 'w') as outFile:
-            outFile.write("Amplitude\tRiseTime\tDecayTime\tmeanIntensity\ttotalLength\tnumOfPeaks\tstartTime\tendTime\n")    
-            for num,t in enumerate(transientData):
-                outFile.write(str(t.getAmplitude()) + "\t" + str(t.getRiseTime())+ "\t" + str(t.getDecayTime()) + "\t" + str(t.getMeanIntensity()) + "\t" + str(t.getTotalTime()) +"\t" + str(t.getNumOfPeaks())+"\t" + str(t.getStartTime()) + "\t"+ str(t.getEndTime()) + "\n")
-                if(t.getIsLast()):
-                    outFile.write("__________________________ROI" + str(num) + "__________________________\n")
-    except IOError:
-        print(str(filename) +"output" +  str(filename).split('\\')[-1] + " is not a valid file path for output!")
-        exit()
-    #cal_neuroIm.writeOut(baselineMatrix, str(filename) + "base")
-    #cal_neuroIm.writeOut(quantileMatrix, str(filename) + "quant")
-    return(transientData)
+        if (transientAUC/kernelAUC < 0.1):
+            transients.remove(i)
+    return(transients)
 
 class Transient:
     '''
@@ -632,4 +584,307 @@ class Transient:
     
     def getTotalTime(self):
         return (self.totalTime);
+
+import numpy as np
+import scipy.signal 
+import scipy.linalg
+
+from warnings import warn    
+try:
+    from cvxopt import matrix, spmatrix, spdiag, solvers
+    import picos
+except ImportError:
+    raise ImportError('Constrained Foopsi requires cvxopt and picos packages.')
+
+
+#%%
+def constrained_foopsi(fluor, 
+                     b = None, 
+                     c1 = None, 
+                     g = None, 
+                     sn = None, 
+                     p= 2, 
+                     method = 'cvx', 
+                     bas_nonneg = True, 
+                     noise_range = [.25,.5],
+                     noise_method = 'logmexp',
+                     lags = 5, 
+                     resparse = 0,
+                     fudge_factor = 1, 
+                     verbosity = False):
+
+    """
+    Infer the most likely discretized spike train underlying a fluorescence
+    trace, using a noise constrained deconvolution approach
+    Inputs
+    ----------
+    fluor   : nparray
+        One dimensional array containing the fluorescence intensities with
+        one entry per time-bin.
+    b       : float, optional
+        Fluorescence baseline balue. If no value is given, then b is estimated 
+        from the data
+    c1      : 
+    g       : float, optional
+        Parameters of the AR process that models the fluorescence impulse response.
+        Estimated from the data if no value is given
+    sn      : float, optional
+        Standard deviation of the noise distribution.  If no value is given, 
+        then sn is estimated from the data.        
+    options : dictionary
+        list of user selected options (see more below)
+    'p'             :         2, # AR order 
+    'method'        :     'cvx', # solution method (no other currently supported)
+    'bas_nonneg'    :      True, # bseline strictly non-negative
+    'noise_range'   :  [.25,.5], # frequency range for averaging noise PSD
+    'noise_method'  : 'logmexp', # method of averaging noise PSD
+    'lags'          :         5, # number of lags for estimating time constants
+    'resparse'      :         0, # times to resparse original solution (not supported)
+    'fudge_factor'  :         1, # fudge factor for reducing time constant bias
+    'verbosity'     :     False, # display optimization details
     
+    Returns
+    -------
+    c            : ndarray of float
+        The inferred denoised fluorescence signal at each time-bin.
+    b, c1, g, sn : As explained above
+    sp           : ndarray of float
+        Discretized deconvolved neural activity (spikes)
+    
+    References
+    ----------
+    * Pnevmatikakis et al. 2015. Submitted (arXiv:1409.2903).
+    * Machado et al. 2015. Cell 162(2):338-350
+    """
+
+    
+    if g is None or sn is None:        
+        g,sn = estimate_parameters(fluor, p=p, sn=sn, g = g, range_ff=noise_range, method=noise_method, lags=lags, fudge_factor=fudge_factor)
+
+  
+    
+    T = len(fluor)
+    # construct deconvolution matrix  (sp = G*c) 
+    G = spmatrix(1.,range(T),range(T),(T,T))
+
+    for i in range(p):
+        G = G + spmatrix(-g[i],np.arange(i+1,T),np.arange(T-i-1),(T,T))
+        
+    gr = np.roots(np.concatenate([np.array([1]),-g.flatten()])) 
+    gd_vec = np.max(gr)**np.arange(T)  # decay vector for initial fluorescence
+    gen_vec = G * matrix(np.ones(fluor.size))  
+    
+    # Initialize variables in our problem
+    prob = picos.Problem()
+    
+    # Define variables
+    calcium_fit = prob.add_variable('calcium_fit', fluor.size)    
+    cnt = 0
+    if b is None:
+        flag_b = True
+        cnt += 1
+        b = prob.add_variable('b', 1)
+        if bas_nonneg:
+            b_lb = 0
+        else:
+            b_lb = np.min(fluor)
+            
+        prob.add_constraint(b >= b_lb)
+    else:
+        flag_b = False
+
+    if c1 is None:
+        flag_c1 = True
+        cnt += 1
+        c1 = prob.add_variable('c1', 1)
+        prob.add_constraint(c1 >= 0)
+    else:
+        flag_c1 = False
+    
+    # Add constraints    
+    prob.add_constraint(G * calcium_fit >= 0)
+    #this line takes FOREVER. what's going on here?
+    res = abs(matrix(fluor.astype(float)) - calcium_fit - b*matrix(np.ones(fluor.size)) - matrix(gd_vec) * c1)
+    prob.add_constraint(res < sn * np.sqrt(fluor.size))
+    prob.set_objective('min', calcium_fit.T * gen_vec)
+    
+    # solve problem
+    try:
+        prob.solve(solver='mosek', verbose=verbosity)
+        sel_solver = 'mosek'
+#        prob.solve(solver='gurobi', verbose=verbosity)
+#        sel_solver = 'gurobi'
+    except ImportError:
+        warn('MOSEK is not installed. Spike inference may be VERY slow!')
+        sel_solver = []
+        prob.solver_selection()
+        prob.solve(verbose=verbosity)
+        
+    # if problem in infeasible due to low noise value then project onto the cone of linear constraints with cvxopt
+    if prob.status == 'prim_infeas_cer' or prob.status == 'dual_infeas_cer' or prob.status == 'primal infeasible':
+        warn('Original problem infeasible. Adjusting noise level and re-solving')   
+        # setup quadratic problem with cvxopt        
+        solvers.options['show_progress'] = verbosity
+        ind_rows = range(T)
+        ind_cols = range(T)
+        vals = np.ones(T)
+        if flag_b:
+            ind_rows = ind_rows + range(T) 
+            ind_cols = ind_cols + [T]*T
+            vals = np.concatenate((vals,np.ones(T)))
+        if flag_c1:
+            ind_rows = ind_rows + range(T)
+            ind_cols = ind_cols + [T+cnt-1]*T
+            vals = np.concatenate((vals,np.squeeze(gd_vec)))            
+        P = spmatrix(vals,ind_rows,ind_cols,(T,T+cnt))
+        H = P.T*P
+        Py = P.T*matrix(fluor.astype(float))
+        sol = solvers.qp(H,-Py,spdiag([-G,-spmatrix(1.,range(cnt),range(cnt))]),matrix(0.,(T+cnt,1)))
+        xx = sol['x']
+        c = np.array(xx[:T])
+        sp = np.array(G*matrix(c))
+        c = np.squeeze(c)
+        if flag_b:
+            b = np.array(xx[T+1]) + b_lb
+        if flag_c1:
+            c1 = np.array(xx[-1])
+        sn = np.linalg.norm(fluor-c-c1*gd_vec-b)/np.sqrt(T)   
+    else: # readout picos solution
+        c = np.squeeze(calcium_fit.value)
+        sp = np.squeeze(np.asarray(G*calcium_fit.value))        
+        if flag_b:    
+            b = np.squeeze(b.value)        
+        if flag_c1:    
+            c1 = np.squeeze(c1.value)                    
+
+    return c,b,c1,g,sn,sp
+
+
+def estimate_parameters(fluor, p = 2, sn = None, g = None, range_ff = [0.25,0.5], method = 'logmexp', lags = 5, fudge_factor = 1):
+    """
+    Estimate noise standard deviation and AR coefficients if they are not present
+    """
+    
+    if sn is None:
+        sn = GetSn(fluor,range_ff,method)
+        
+    if g is None:
+        g = estimate_time_constant(fluor,p,sn,lags,fudge_factor)
+
+    return g,sn
+
+def estimate_time_constant(fluor, p = 2, sn = None, lags = 5, fudge_factor = 1):
+    """    
+    Estimate AR model parameters through the autocovariance function    
+    Inputs
+    ----------
+    fluor        : nparray
+        One dimensional array containing the fluorescence intensities with
+        one entry per time-bin.
+    p            : positive integer
+        order of AR system  
+    sn           : float
+        noise standard deviation, estimated if not provided.
+    lags         : positive integer
+        number of additional lags where he autocovariance is computed
+    fudge_factor : float (0< fudge_factor <= 1)
+        shrinkage factor to reduce bias
+        
+    Return
+    -----------
+    g       : estimated coefficients of the AR process
+    """    
+    
+
+    if sn is None:
+        sn = GetSn(fluor)
+        
+    lags += p
+    xc = axcov(fluor,lags)        
+    xc = xc[:,np.newaxis]
+    
+    A = scipy.linalg.toeplitz(xc[lags+np.arange(lags)],xc[lags+np.arange(p)]) - sn**2*np.eye(lags,p)
+    g = np.linalg.lstsq(A,xc[lags+1:])[0]
+    if fudge_factor < 1:
+        gr = fudge_factor*np.roots(np.concatenate([np.array([1]),-g.flatten()]))
+        gr = (gr+gr.conjugate())/2
+        gr[gr>1] = 0.95
+        gr[gr<0] = 0.15
+        g = np.poly(gr)
+        g = -g[1:]        
+        
+    return g.flatten()
+    
+def GetSn(fluor, range_ff = [0.25,0.5], method = 'logmexp'):
+    """    
+    Estimate noise power through the power spectral density over the range of large frequencies    
+    Inputs
+    ----------
+    fluor    : nparray
+        One dimensional array containing the fluorescence intensities with
+        one entry per time-bin.
+    range_ff : (1,2) array, nonnegative, max value <= 0.5
+        range of frequency (x Nyquist rate) over which the spectrum is averaged  
+    method   : string
+        method of averaging: Mean, median, exponentiated mean of logvalues (default)
+        
+    Return
+    -----------
+    sn       : noise standard deviation
+    """
+    
+
+    ff, Pxx = scipy.signal.welch(fluor)
+    ind1 = ff > range_ff[0]
+    ind2 = ff < range_ff[1]
+    ind = np.logical_and(ind1,ind2)
+    Pxx_ind = Pxx[ind]
+    sn = {
+        'mean': lambda Pxx_ind: np.sqrt(np.mean(Pxx_ind/2)),
+        'median': lambda Pxx_ind: np.sqrt(np.median(Pxx_ind/2)),
+        'logmexp': lambda Pxx_ind: np.sqrt(np.exp(np.mean(np.log(Pxx_ind/2))))
+    }[method](Pxx_ind)
+
+    return sn
+
+def axcov(data, maxlag=5):
+    """
+    Compute the autocovariance of data at lag = -maxlag:0:maxlag
+    Parameters
+    ----------
+    data : array
+        Array containing fluorescence data
+    maxlag : int
+        Number of lags to use in autocovariance calculation
+    Returns
+    -------
+    axcov : array
+        Autocovariances computed from -maxlag:0:maxlag
+    """
+    
+    data = data - np.mean(data)
+    T = len(data)
+    bins = np.size(data)
+    xcov = np.fft.fft(data, np.power(2, nextpow2(2 * bins - 1)))
+    xcov = np.fft.ifft(np.square(np.abs(xcov)))
+    xcov = np.concatenate([xcov[np.arange(xcov.size - maxlag, xcov.size)],
+                           xcov[np.arange(0, maxlag + 1)]])
+    #xcov = xcov/np.concatenate([np.arange(T-maxlag,T+1),np.arange(T-1,T-maxlag-1,-1)])
+    return np.real(xcov/T)
+    
+def nextpow2(value):
+    """
+    Find exponent such that 2^exponent is equal to or greater than abs(value).
+    Parameters
+    ----------
+    value : int
+    Returns
+    -------
+    exponent : int
+    """
+    
+    exponent = 0
+    avalue = np.abs(value)
+    while avalue > np.power(2, exponent):
+        exponent += 1
+    return exponent 
