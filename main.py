@@ -46,7 +46,7 @@ for filename in args.inputFile:
     
     meanKernel = cal_neuroIm.createMeanKernel(transientMatrix)
     #print ("time for mean kernel calculation: %f") % (time.time() - time1)
-    apTimings,uselessValue = cal_neuroIm.importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/apTimings.csv',args.seperator)
+    #apTimings,uselessValue = cal_neuroIm.importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/apTimings.csv',args.seperator)
     #TODO: array containing only the transient data -> check negative transients first and filter!
     #ALSO: plot slope distribution, pack decon techniques into one picture -> where should cutoff be?
 
@@ -70,11 +70,11 @@ for filename in args.inputFile:
         axarr1.plot(spikeTrain,'r-')
         
         axarr0.plot(optiMethodSpikes[i],"r")
-    
+        '''
         for x in squeeze(apTimings[i]):
             if ~isnan(x):
                 axarr1.plot([int(x),int(x)],[0,1],'g--',lw=2)
-        
+        '''
         thisMean2 = mean(baselineMatrix[:,i])
         '''for j in transientMatrix[i]: # yes, iterate over transient objects
             if(transientMatrix[i]): # is there a transient in this time series?
