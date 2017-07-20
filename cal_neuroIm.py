@@ -4,45 +4,45 @@ script contains methods used for main.py
 @author: maximilian
 '''
 from numpy import percentile,zeros,var, mean, arange, concatenate, savetxt, sign, ceil,\
-matrix, std, around, fft, divide, abs, ones, resize, exp, nditer,trapz, argmax,\
-    append, sum, argmin
+ std, around, fft, divide, abs, ones, resize, exp, nditer,trapz, argmax,\
+    append, sum, argmin, matrix
 from sys import maxint
 from scipy.ndimage.filters import gaussian_filter
 from scipy.stats import norm
 from scipy.optimize import curve_fit
-import pandas, xlrd, time
+import pandas, xlrd
 from xlrd.biffh import XLRDError
 from scipy.stats.stats import mode
 
-def importMatrix(filename,valSeperator):
+def importMatrix(filename,valSeparator):
     '''
     imports csv or xls formatted file, returns ndArray 
     @input: filename: input path; valSeperator: seperator between entries, treats file as xlrd if none
     @return: numOfVals: number of collumns in file (cells); dataMatrix: ndArray containing file data (dtype float)
     '''
-    dataMatrix = []
     try:
-        if(valSeperator):
-            frame = pandas.read_csv(filename,sep = valSeperator)
-            for x in frame.values:
-                dataMatrix.append(x)
-            numOfVals = x.size
+        if(valSeparator):
+            frame = pandas.read_csv(filename,sep = valSeparator)
+            numOfRois = frame.shape[1]
+            dataMatrix = frame.as_matrix()
+            dataMatrix = matrix(dataMatrix).A
         else:
             try:
+                dataMatrix = []
                 book = xlrd.open_workbook(filename)
                 sh = book.sheet_by_index(0)
-                numOfVals = sh.ncols
+                numOfRois = sh.ncols
                 for rx in range(sh.nrows):
                     dataMatrix.append(getValues(sh.row(rx)))
+                dataMatrix = matrix(dataMatrix).A
             except XLRDError:
-                print("Wrong format! Try adding -csv to the invocation")
+                print("Wrong format! The file might contain comma-seperated values. Try using the -sep argument (E.G. -sep '\\t'")
                 exit()
     except IOError:
         print(str(filename) + " is not a valid file path !")
         exit()
-    from numpy import matrix as m
-    dataMatrix = m(dataMatrix).A
-    return(dataMatrix, numOfVals)
+    
+    return(dataMatrix, numOfRois)
 
 '''
 @param numOfVals: number of Values per row (e.g. ROIs)
@@ -387,38 +387,28 @@ def detectNumOfPeaks(data):
     if(len(data) <2):
         return(1)
     numOfPeaks = 0
-    data = gaussian_filter(data, 9)
-    oldSign = sign(meanSlope([data[0],data[1]]))
+    steps = len(data)/10
+    data2 = [sum(data[i:i+steps-1])/steps for i in range(len(data)-steps)]
+    data = gaussian_filter(data2, 9)    
+    prevPoint = 0
+    oldSign = 1
     
-    for i in range(len(data)-1):
-        newSign = sign(meanSlope([data[i],data[i+1]]))
+    for i in data:
+        newSign = sign(i- prevPoint)
         if (newSign != oldSign):
             numOfPeaks += 1
         oldSign = newSign
-        
-    numOfPeaks = max([int(ceil(numOfPeaks/2)),1])
-    return(numOfPeaks);
+        prevPoint = i
 
-def getSinglePeakTransient(transients):
-    lowestAmplitude = maxint
-    lowestPeakNum = maxint
-    peakProperties = []
-    
-    for t in transients:
-        if (t.getNumOfPeaks() > lowestPeakNum):
-            continue
-        if (t.getAmplitude() < lowestAmplitude):
-            lowestAmplitude = t.getAmplitude
-            peakProperties = t
-    return(peakProperties)
+    return(numOfPeaks);
 
 def createMeanKernel(transientMatrix):
     #Function is called for one ROI, iterates over the transients. Problem: requires information from ALL ROI's and transients for computation.
 
-    singlePeakArray = [i for j in transientMatrix for i in j if i.getNumOfPeaks()==1 ]
-    risetimeArray = [i.getRiseTime() for i in singlePeakArray]
-    decaytimeArray = [i.getDecayTime() for i in singlePeakArray]
-    amplitudeArray = [i.getAmplitude() for i in singlePeakArray]
+    singlePeakArray = [i for j in transientMatrix for i in j if i.numOfPeaks==1 ]
+    risetimeArray = [i.riseTime for i in singlePeakArray]
+    decaytimeArray = [i.decayTime for i in singlePeakArray]
+    amplitudeArray = [i.amplitude for i in singlePeakArray]
     
     risetimeStd = std(risetimeArray)
     risetimeMean = mean(risetimeArray)
@@ -436,15 +426,15 @@ def createMeanKernel(transientMatrix):
     # block below: mean transients falling within 2 STD of 1 peak transient mean
     import matplotlib.pyplot as plt
     meanArray = zeros(0,dtype=float)
-    divideArray = zeros(transientMatrix[0][0].getNumOfFrames(),dtype=int)
+    divideArray = zeros(transientMatrix[0][0].numOfFrames,dtype=int)
     constrainRelaxVariable = 1
     while (not meanArray.any()):
         for i in singlePeakArray: # go over ROIs
-            if (i.getNumOfPeaks() == 1 and amplitudeThreshDown/constrainRelaxVariable < i.getAmplitude() < amplitudeThreshUp*constrainRelaxVariable and 
-                    decaytimeThreshDown/constrainRelaxVariable < i.getDecayTime() < decaytimeThreshUp*constrainRelaxVariable and 
-                    risetimeThreshDown/constrainRelaxVariable < i.getRiseTime() < risetimeThreshUp*constrainRelaxVariable): # we already know which ones are the single peak transients, but re-checking is cheaper than a new array
+            if (i.numOfPeaks == 1 and amplitudeThreshDown/constrainRelaxVariable < i.amplitude < amplitudeThreshUp*constrainRelaxVariable and 
+                    decaytimeThreshDown/constrainRelaxVariable < i.decayTime < decaytimeThreshUp*constrainRelaxVariable and 
+                    risetimeThreshDown/constrainRelaxVariable < i.riseTime < risetimeThreshUp*constrainRelaxVariable): # we already know which ones are the single peak transients, but re-checking is cheaper than a new array
                     
-                    currentTransient = i.getData()
+                    currentTransient = i.data
                     plt.plot(currentTransient,"grey",alpha=0.2)
                     if(len(currentTransient)>len(meanArray)):
                         meanArray.resize(currentTransient.shape)
@@ -473,7 +463,7 @@ def createMeanKernel(transientMatrix):
     plt.plot(alphaKernel(tVariable, *popt), 'r-', label='fit')
     plt.savefig('alphaKernel.png')
     plt.close()
-    return(alphaKernel(arange(i.getNumOfFrames()),*popt))
+    return(alphaKernel(arange(i.numOfFrames),*popt))
 
 def alphaKernel (t, A,t_A,t_B):
     return A*(exp(-t/t_A)-exp(-t/t_B))
@@ -485,17 +475,24 @@ def deconvolve(transients, kernel):
     '''
     if (not transients):
         return(zeros(kernel.size))
-    spikeSignal = zeros(transients[0].getNumOfFrames())
+    import matplotlib.pyplot as plt
+    spikeSignal = zeros(transients[0].numOfFrames)
     for i in (transients):
-        transientData = i.getData()
+        transientData = i.data
         
         if transientData.size > kernel.size:
             thisKernel = append(kernel,zeros(transientData.size-kernel.size))
         else:
             thisKernel = resize(kernel,transientData.shape)
         #spikeTrain = fft.ifft(fft.fft(transientData)/ fft.fft(transientKernel))# with ifft = inverse fast fourier transform and fft = fast fourier transform
-        spikeSignal[i.getStartTime():i.getEndTime()] = (fft.ifft(divide(fft.fft(transientData), fft.fft(thisKernel))))
-        spikeSignal[i.getStartTime():i.getEndTime()] = generateSpiketrainFromSignal(spikeSignal[i.getStartTime():i.getEndTime()])
+        spikeSignal[i.startTime:i.endTime] = (fft.ifft(divide(fft.fft(transientData), fft.fft(thisKernel))))
+        plt.plot(spikeSignal[i.startTime:i.endTime])
+        plt.axis("off")
+        
+        spikeSignal[i.startTime:i.endTime] = generateSpiketrainFromSignal(spikeSignal[i.startTime:i.endTime])
+        plt.plot(spikeSignal[i.startTime:i.endTime])
+        plt.savefig("poop")
+        plt.close()
     return(spikeSignal)
 
 def generateSpiketrainFromSignal(spikeSignal):
@@ -515,8 +512,8 @@ def negativeTransientsCorrect(transients):
     numOfNeg = 0
     meanTrans = ()
     for i in transients:
-        meanTrans.append(mean(i.getData))
-        if mean(i.getData)< 0:
+        meanTrans.append(mean(i.data))
+        if mean(i.data)< 0:
             numOfNeg += 1
     for j in range(numOfNeg):
         transients.remove(argmin(meanTrans))
@@ -525,11 +522,11 @@ def negativeTransientsCorrect(transients):
 def aucCorrect(transients, kernel):
     '''
     naive approach, less accurate for overlapping activity
+    kicks out transients which lack surface area
     '''
     kernelAUC = trapz(kernel)
     for i in (transients):
-        transientAUC = trapz(i.getData())
-        #spikeTrain = fft.ifft(fft.fft(transientData)/ fft.fft(transientKernel))# with ifft = inverse fast fourier transform and fft = fast fourier transform
+        transientAUC = trapz(i.data)
         if (transientAUC/kernelAUC < 0.1):
             transients.remove(i)
     return(transients)
@@ -541,10 +538,8 @@ class Transient:
     def __init__(self, data, startTime,endTime, numOfFrames):
         
         maxVal = maxAmp(data)
-        self.isLast = False
         self.startTime = startTime
         self.endTime = endTime
-        self.std = std(data)
         self.amplitude = float(maxVal[0]) 
         self.riseTime = maxVal[1]
         self.decayTime = len(data) + 1 - self.riseTime
@@ -552,35 +547,4 @@ class Transient:
         self.numOfPeaks = detectNumOfPeaks(data)
         self.data = data
         self.numOfFrames = numOfFrames
-    
-    def getData(self):
-        return(self.data)
-    def getNumOfFrames(self):
-        return(self.numOfFrames)
-    def getCoordinates(self):
-        return[self.startTime,self.endTime]
-    
-    def getStartTime(self):
-        return(self.startTime)
-    def getEndTime(self):
-        return(self.endTime)
-    def getRiseTime(self):
-        return self.riseTime;
-        
-    def getDecayTime(self):
-        return self.decayTime;
-    def getNumOfPeaks(self):
-        return(self.numOfPeaks)
-    def getStd(self):
-        return(self.std);
-    
-    def getIsLast(self):
-        return self.isLast;
-    def setIsLast(self):
-        self.isLast = True
-        
-    def getAmplitude(self):
-        return self.amplitude;
-    
-    def getTotalTime(self):
-        return (self.totalTime);
+        self.coordinates = (self.startTime, self.endTime)
