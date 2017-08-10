@@ -14,7 +14,7 @@ Created on Sep 30, 2016
 
 '''
 import time, argparse, cal_neuroIm
-from numpy import mean, isnan, squeeze
+from numpy import savetxt,zeros, array,sum
 #'/home/maximilian/unistuff/paris_ens/cal_neuroim/driftData/a5 KO anaesthetized mice data/2014.02.04 a5 cage 18/TSeries-02042014-1019-4562/Analysis/Results.xls'
 start_time = time.time() # get sys time to calculate runtime
  
@@ -29,53 +29,43 @@ args = inputParser.parse_args()
 
 for filename in args.inputFile:
     
-    rawMatrix, numOfVals = cal_neuroIm.importMatrix(filename,args.seperator)
+    spikeNum = 0
+    rawMatrix, numOfVals = cal_neuroIm._importMatrix(filename,args.seperator)
     print("on file:" + str(filename) + " with " + str(numOfVals) + " ROIs")
-    time1 = time.time()
     
     baselineMatrix, baselineCoordinates = cal_neuroIm.pushToBaseline(rawMatrix,args.b)
-    transientMatrix, quantileMatrix, slopeDistributions = cal_neuroIm.eventDetect(baselineMatrix, args.q,len(rawMatrix)/150)
-    
+    transientMatrix, quantileMatrix, slopeDistributions = cal_neuroIm.eventDetect(baselineMatrix, args.q,50)
+    #TODO: what is a good range for the slope calculations? should I hard-code this too? maybe add parameter sheet option for stuff
     meanKernel = cal_neuroIm.createMeanKernel(transientMatrix)
-    #print ("time for mean kernel calculation: %f") % (time.time() - time1)
     
-    #apTimings,uselessValue = cal_neuroIm.importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/lowVarTimings.csv',args.seperator)
+    apTimings,uselessValue = cal_neuroIm._importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/testData/cai2camp_aps.csv'," ")
     
-    #TODO: array containing only the transient data -> check negative transients first and filter!
-    #ALSO: plot slope distribution, pack decon techniques into one picture -> where should cutoff be?
+    for i in range(numOfVals):#print("decon time: %f vs. total plotting loop time: %f" % (decontime,time.time() - time2))
 
-    for i in range(numOfVals):
-        #todo: images to generate: complex vs. simple transients, alpha kernel shape, good vs. bad slope distributions, deconvolution signal, images of how to run the algorithm
-        # also: output visualization
         import matplotlib.pyplot as plt
-        transientMatrix[i] = cal_neuroIm.aucCorrect(transientMatrix[i], meanKernel)
+        #transientMatrix[i] = cal_neuroIm.aucCorrect(transientMatrix[i], meanKernel)
+        #transientMatrix[i] = cal_neuroIm.negativeTransientsCorrect(transientMatrix[i])
         f,(axarr0,axarr1,axarr2) = plt.subplots(3, sharex=False)
-        eventCoordinates = [j.coordinates for j in transientMatrix[i]] # ugly hack that defeats the purpose. REFACTOR
-        time1 = time.time()
+        axarr0.plot(baselineMatrix[:,i])
         spikeSignal = cal_neuroIm.deconvolve(transientMatrix[i], meanKernel)
         
-        spikeTrain = cal_neuroIm.generateSpiketrainFromSignal(spikeSignal)
-       
         axarr2.hist(slopeDistributions[i][2], 100, normed=1, facecolor='green', alpha=0.75)
         axarr2.plot(slopeDistributions[i][0],slopeDistributions[i][1],'r--', linewidth=2)
         axarr2.plot([slopeDistributions[i][3],slopeDistributions[i][3]],[0,50],'k--',lw=3)
-       
-        axarr1.plot(spikeSignal,'b')
-        plt.grid(True)
-        axarr1.plot(spikeTrain,'r-')
         
-        '''
-        for x in squeeze(apTimings[i]):
-            if ~isnan(x):
-                axarr1.plot([int(x),int(x)],[0,1],'g--',lw=2)
-        '''
+        titleString = str(sum(spikeSignal)) + " " + str(sum(apTimings[:,i]))
+        axarr1.text(0,0,titleString)
+        axarr1.plot(spikeSignal,'r',lw=0.2)
+        axarr1.plot(apTimings[:,i],'g',alpha=0.5,lw=0.1)
         for j in transientMatrix[i]: # yes, iterate over transient objects
             if(transientMatrix[i]): # is there a transient in this time series?
                 coords = j.coordinates
                 axarr0.plot(coords,[0,1],'g^', lw=2)
         axarr0.plot(baselineCoordinates[i],[0,0],'k.',lw=1)
-        plt.savefig(str(filename) + str(i)+".png")
+        outputFile = args.outputFilePath+filename.split("/")[-1] +str(i)+".png"
+        plt.savefig(outputFile)
         plt.close()
-#print("decon time: %f vs. total plotting loop time: %f" % (decontime,time.time() - time2))
+        spikeNum += sum(spikeSignal)
+    #deconvolvedMatrix = array(cal_neuroIm.deconvolve(transientMatrix, meanKernel)).transpose()
+    #savetxt("/home/maximilian/unistuff/paris_ens/cal_neuroim/testData/deconvolvedGecoAps.csv", deconvolvedMatrix, fmt="%i", delimiter=" ")
 print("--- %s seconds ---" % (time.time() - start_time))
-
