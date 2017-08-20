@@ -3,7 +3,7 @@ Created on Oct 3, 2016
 script contains methods used for main.py
 @author: maximilian
 '''
-import numpy
+import numpy, time
 from scipy.ndimage.filters import gaussian_filter
 from scipy.stats import norm
 from scipy.optimize import curve_fit
@@ -15,44 +15,37 @@ def _importMatrix(filename,valSeparator):
     '''
     imports csv or xls formatted file, returns ndArray 
     @input: filename: input path; valSeperator: seperator between entries, treats file as xlrd if none
-    @return: numOfVals: number of collumns in file (cells); dataMatrix: ndArray containing file data (dtype float)
+    @return: numOfVals: number of collumns in file (ROIs); dataMatrix: ndArray containing file data (dtype float)
     '''
-    try:
-        if(valSeparator):
-            try:
-                frame = pandas.read_csv(filename,sep = valSeparator,engine='python',skipinitialspace=True)    
-            except:
-                import csv
-                csv.field_size_limit(sys.maxsize)
-                try:
-                    frame = pandas.read_csv(filename,sep = valSeparator,engine='python',skipinitialspace=True)
-                except:
-                    print("Parse error during file read! Is the input too large for RAM?\nTry listing the time-series collumn-wise instead of row-wise.")
-                    exit()
-            numOfVals = frame.shape[1]
-            dataMatrix = frame.as_matrix()
-            numOfRois = len(dataMatrix)
-            if(numOfVals < len(dataMatrix)):
-                numOfRois = numOfVals
-                numOfVals = len(dataMatrix)
-            else:
-                dataMatrix = dataMatrix.transpose()
+    if(valSeparator):
+        try:
+            frame = pandas.read_csv(filename,sep = valSeparator,engine='python',skipinitialspace=True)    
+        except IOError:
+            print(str(filename) + " is not a valid file path !")
+            exit()
+        numOfVals = frame.shape[1]
+        dataMatrix = frame.as_matrix()
+        numOfRois = len(dataMatrix)
+        if(numOfVals < len(dataMatrix)):
+            numOfRois = numOfVals
+            numOfVals = len(dataMatrix)
         else:
-            try:
-                dataMatrix = []
-                book = xlrd.open_workbook(filename)
-                sh = book.sheet_by_index(0)
-                numOfRois = sh.ncols
-                for rx in range(sh.nrows):
-                    dataMatrix.append(map(float,sh.row(rx)))
-                dataMatrix = numpy.matrix(dataMatrix).A
-            except XLRDError:
-                print("Wrong format! The file might contain comma-seperated values. Try using the -sep argument (E.G. -sep '\\t'")
-                exit()
-    except IOError:
-        print(str(filename) + " is not a valid file path !")
+            dataMatrix = dataMatrix.transpose()
+    else:
+        try:
+            dataMatrix = []
+            book = xlrd.open_workbook(filename)
+            sh = book.sheet_by_index(0)
+            numOfRois = sh.ncols
+            for rx in range(sh.nrows):
+                dataMatrix.append(map(float,sh.row(rx)))
+            dataMatrix = numpy.matrix(dataMatrix).A
+        except XLRDError:
+            print("Wrong format! The file might contain comma-seperated values. Try using the -sep argument (E.G. -sep '\\t'")
+            exit()
+    if(dataMatrix.dtype != "float64"):
+        print ("Can't convert file input to float! Wrong separator argument?")
         exit()
-    
     return(dataMatrix, numOfRois)
 
 '''
@@ -68,35 +61,30 @@ def _getValues (row):
 
 def _meanSlope(inArray):
     '''
-    Given a time series, return the slope (which only depends on the start and end point
+    Given a time series, return the slope (which only depends on the start and end point)
     '''
-    iterNum = len(inArray)
-    avgSlope = (inArray[-1] - inArray[0])/iterNum
+    avgSlope = abs(inArray[-1] - inArray[0])/len(inArray)
     return (float(avgSlope))
 
 def eventDetect (dataMatrix, quantileWidth,slopeWidth):
     '''
-    
-    @param dataMatrix: NxM matrix of the data containing transients and drift(possibly)
-    @param windowSize: size of the window considered for the quantile normalization (none if q = 0)
-    @param slopeWidth: size of the window considered for the calculation of slopes, critical parameter for event detection
-    @return: dataMatrix, eventEndCoordinates, delList, correctionMatrix, baseLineArray
-            dataMatrix:  quantile normalized (if q>0) NxM matrix
-            eventEndCoordinates: tuples of on- and offset coordinates of transients
-            delList: list of ROIs (denominated via their vertical position integer in the matrix) which were not considered and should be dropped
-            correctionMatrix: NxM Matrix containing the subtracted quantiles for visualization of the normalization
-            baseLineArray: 1xM array containing the start coordinates of the sections considered as the baseline 
+    @dataMatrix: NxM matrix of the data containing transients and drift(possibly)
+    @windowSize: size of the window considered for the quantile normalization (none if q = 0)
+    @slopeWidth: size of the window considered for the calculation of slopes, critical parameter for event detection
+    @return: transients: list (or list of lists) of objects of the type transient, one list per ROI (i.e. row in dataMatrix)
+            slopeDistribution: distribution of slopes within the data, not used for further calculations but nice for visualizations
     ''' 
     transients = [] # list of lists of transients
     numOfEntries = len(dataMatrix) # number of entries in file
-    startNumOfHits = 4 # number of hits necessary for an event start to be declared 
+    startNumOfHits = 3 # number of hits necessary for an event start to be declared 
     minEventLength = 15 # number of data points necessary above start level for an event to be kept as such
     
     thresholdList = []
     slopeDistributions = []
-    
     # here we generate a global noise / slope threshold for all ROIs of the file
-    for collumn in numpy.nditer(dataMatrix, order='F',flags=['external_loop'],op_flags=['readonly']): 
+    startTime = time.time()
+    for collumn in dataMatrix.T: 
+        
         slopeList = numpy.zeros(numOfEntries - slopeWidth)
         for i in range(len(slopeList)):
             slopeList[i]= (_meanSlope(collumn[i:i+slopeWidth]))  # threshold to be passed for start of significance
@@ -105,10 +93,7 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
                 break
         # best fit of data according to the log-likelihood maximization estimate
         thisMode = mode(numpy.around(slopeList,3),axis=None)[0]
-        slopeList2 = []
-        for i in slopeList:
-            if i < thisMode:
-                slopeList2.append(i)
+        slopeList2 = [i for i in slopeList if i > thisMode]
         
         mu, sigma = norm.fit(slopeList2)
         # the histogram of the data
@@ -116,10 +101,12 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
         
         import matplotlib.pyplot as plt
         import matplotlib.mlab as mlab
+        #TODO: crash here is "max must be larger than min in range parameter"
         n, bins, patches = plt.hist(slopeList, 100, normed=1, facecolor='green', alpha=0.75)
         y = mlab.normpdf( bins, mu, sigma)
         slopeDistributions.append((bins,y,slopeList,sigma*2))
         plt.close()
+    print ("slope time is: %f" % (time.time()- startTime))
     # re-iterate over the data ROI-wise for determination of event positions - in reverse order because we delete skipped rows immediately
     for horizontalPosition, collumn in enumerate(dataMatrix.T): # generate local noise / slope threshold and consider if we should skip
         baselineMean = numpy.mean(_detectBaseline(collumn, 500)[0]) # we use this to end transients earlier - and have a new one start if activity continues
@@ -135,13 +122,11 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
             shiftValue = numpy.percentile(collumn,8)#shift of data to avoid negative values and the corresponding inversion
         else:
             shiftValue = 0
-        for verticalPosition in range(len(collumn)): # iterate over number of pictures in file, e.g. row-wise
+        
+        for verticalPosition in range(len(collumn)-slopeWidth): # iterate over number of pictures in file, e.g. row-wise
                 
-            if(verticalPosition+40 <= numOfEntries): # get correct slice of data matrix
-                thatSlice = dataMatrix[verticalPosition:verticalPosition+slopeWidth,horizontalPosition]
-            else:
-                thatSlice = dataMatrix[numOfEntries-slopeWidth:,horizontalPosition]
-            thisSlope = abs(_meanSlope(thatSlice))   
+            thisSlope = slopeDistributions[horizontalPosition][2][verticalPosition]
+            
             if (quantileWidth != 0):
                 if (verticalPosition+quantileWidth<=numOfEntries):
                     correctionVal = numpy.percentile(collumn[verticalPosition:verticalPosition+quantileWidth],q=8)
@@ -154,17 +139,18 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
                 if (thisSlope > thisSlopeThreshold):
                     # it is! count hit
                     threshHit += 1
-                    if(threshHit == startNumOfHits):# and dataMatrix[verticalPosition,horizontalPosition] > 0):
+                    if(threshHit == startNumOfHits):
                         eventStart = verticalPosition - startNumOfHits +1
                         eventEnd = verticalPosition
                         isEvent = True
     
             else: 
                 # we are in an event!
-                eventEnd += 1
                 # does it end?
-                if (collumn[eventStart] > collumn[verticalPosition] or collumn[verticalPosition] < baselineMean): # check if it ends
+                if (collumn[eventStart] > collumn[verticalPosition] #or collumn[verticalPosition] < baselineMean 
+                    and collumn[verticalPosition] < 1): # check if it ends
                     isEvent = False
+                    eventEnd = verticalPosition
                     threshHit = 0
                     if(eventEnd-eventStart > minEventLength):
                         theseTransients.append(_Transient(collumn[eventStart:eventEnd],eventStart,eventEnd,numOfEntries))
@@ -172,55 +158,61 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
         if(isEvent):
             # event lasted until end of the data, correct the last bit
             #theseEventEndCoordinates.append([eventStart,eventEnd])
-            theseTransients.append(_Transient(collumn[eventStart:eventEnd],eventStart,eventEnd,numOfEntries))
+            theseTransients.append(_Transient(collumn[eventStart:],eventStart,numOfEntries,numOfEntries))
 
         #eventEndCoordinates.append(theseEventEndCoordinates[:])
         transients.append(theseTransients)
         collumn += shiftValue # shift of data to avoid negatives if we quantile corrected
         #if (theseEventEndCoordinates):axarr2
             #collumn = discardNonEvent(collumn, theseEventEndCoordinates,baseLineArray[horizontalPosition])
+
     return (transients,slopeDistributions);
 
-def thresholdEventDetect(dataMatrix, quantileWidth, emptyplaceholder):
+def thresholdEventDetect(dataMatrix, quantileWidth):
     '''
     alternative to eventDetect, uses a simple threshold (baseline mean + 5 standard deviations of baseline) for transient detection
     '''
-    numOfEntries = dataMatrix.shape[1]
-    eventEndCoordinates = []
-    numOfVals = len(dataMatrix)
-    correctionMatrix = numpy.zeros([numOfVals,numOfEntries])
-    minEventlength = 50
-    for position1,collumn in enumerate(dataMatrix.T):
-        theseEventEndCoordinates = []
+    minEventLength = 15
+    transients = []
+    numOfVals =  len(dataMatrix)
+
+    for collumn in (dataMatrix.T):
+        theseTransients = []
         eventBool = True
         collumn = collumn.T
-        base = _detectBaseline(collumn,200)[0]
-        baseMean = numpy.mean(base)
-        baseStd = numpy.std(base)
-        threshold = baseStd*5 + baseMean
         eventStart = 0
         eventEnd = 0
+        numOfEntries = len(collumn)
+        
+        if(quantileWidth > 0):    
+            
+            for position2,value in enumerate(collumn):
+                if (quantileWidth > 0):
+                    if(position2+quantileWidth < numOfVals):
+                        correctionValue = numpy.percentile(collumn[position2:position2+quantileWidth],8)
+                    else:
+                        correctionValue = numpy.percentile(collumn[numOfVals-quantileWidth:],8)
+                    value[...] -= correctionValue
+        
+        base = _detectBaseline(collumn,400)[0]
+        baseMean = numpy.mean(base)
+        threshold =  baseMean +0.5#+ numpy.std(collumn) * 2
         for position2,value in enumerate(collumn):
-            if (quantileWidth > 0):
-                if(position2+quantileWidth < numOfVals):
-                    correctionValue = numpy.percentile(collumn[position2:position2+quantileWidth],8)
-                else:
-                    correctionValue = numpy.percentile(collumn[numOfVals-quantileWidth:],8)
-                    value -= correctionValue
-                    correctionMatrix[position1,position2] = correctionValue
             if eventBool: # we are not in an event, check if one is starting
                 if threshold < value:# yes: below, no: continue
+                    #print("event started at val: %f vs thres %f" % (value, threshold))
                     eventBool = False
                     eventStart = position2
             else:
-                if value < baseMean+ baseStd and minEventlength < position2 - eventStart:
+                if threshold > value and minEventLength <  position2 - eventStart:
                     eventBool = True
                     eventEnd = position2
-                    theseEventEndCoordinates.append([eventStart,eventEnd])
+                    theseTransients.append(_Transient(collumn[eventStart:eventEnd]-1,eventStart,eventEnd,numOfEntries))
         if(not eventBool):
-            theseEventEndCoordinates.append([eventStart,numOfVals-1])
-        eventEndCoordinates.append(theseEventEndCoordinates)
-    return(dataMatrix,eventEndCoordinates,emptyplaceholder, correctionMatrix)
+            theseTransients.append(_Transient(collumn[eventStart:]-1,eventStart,len(collumn),numOfEntries))
+
+        transients.append(theseTransients)
+    return(transients)
 
 def _quantileCorrect (inputArray, eventCoordinates, windowSize):
     ''' 
@@ -275,7 +267,7 @@ def _quantileCorrect (inputArray, eventCoordinates, windowSize):
     return (inputArray,correctionArray);
 
 def _quantileNorm (inputArray, eventCoordinates, windowSize):
-    ''' Alternative version of quantileCorrect which does not skip over events- not in use, eventDetect does this anyway
+    '''DEPRECATED Alternative version of quantileCorrect which does not skip over events- not in use, eventDetect does this anyway
     '''
     if(len(eventCoordinates) == 0):
         return(inputArray)
@@ -300,7 +292,7 @@ def _quantileNorm (inputArray, eventCoordinates, windowSize):
 
 def _writeOut(data, fileName):
     '''
-    Small method to print matrix with "meanN"- header, as found in the .cls files
+    Small method to print matrix with "meanN"- header, as found in .cls files
     '''
     numOfCols = (data.shape[1])
     headerString = ''
@@ -313,10 +305,11 @@ def pushToBaseline (dataMatrix, bucketSize):
     '''
     @param dataMatrix: matrix of the data whose baseline we're looking for
     @param bucketSize: size of the baseline bins
-    @return: baseline corrected version of the data, currently also expressed data in terms of sigma
+    @return: baseline corrected version of the data: 
+            coordList: tuple with start / end coordinate of the region determined as baseline activity, for visualization purposes
     '''
     coordList = []
-    for roi in numpy.nditer(dataMatrix,order='F',flags=['external_loop','refs_ok'],op_flags=['readwrite']): # iterate over number of ROIs in file, e.g. collumn-wise
+    for roi in (dataMatrix.T): # iterate over number of ROIs in file, e.g. collumn-wise
         baseLineArray, coordinates= _detectBaseline(roi, bucketSize)
         meanVal = abs(numpy.mean(baseLineArray))
         coordList.append(coordinates)
@@ -334,7 +327,8 @@ def _detectBaseline (data, bucketSize):
     lowestSigma = sys.maxint # for size comparasion
     baselineArray = numpy.zeros(bucketSize)
     coordinate = []
-    for j in range(0,int(numOfEntries-bucketSize),int(numOfEntries/(bucketSize*2))): # iterate over 1 out of 10 bucket positions
+    #TODO: this is where it crashes with wrong sep- argument
+    for j in range(0,int(numOfEntries-bucketSize),int(numOfEntries/(bucketSize*2))): 
         thisStd = numpy.std(data[j:j+bucketSize])#(axisStd(data[j:j+bucketSize])) # current deviation
         if (thisStd < lowestSigma): # new min deviation found
             lowestSigma = thisStd
@@ -485,24 +479,31 @@ def deconvolve(transients, kernel):
                 thisKernel = numpy.append(kernel,numpy.zeros(transient.data.size-kernel.size))
             else:
                 thisKernel = numpy.resize(kernel,transient.data.shape)
-            spikeSignal[transient.startTime:transient.endTime] = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(transient.data), numpy.fft.fft(thisKernel))))
-            spikeSignal[transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(spikeSignal[transient.startTime:transient.endTime])
+            
+            deconvolved = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(transient.data), numpy.fft.fft(thisKernel))))
+            spikeSignal[transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved)
         
     return(spikeSignal)
 
 def _generateSpiketrainFromSignal(spikeSignal):
-    
+    if (numpy.isnan(spikeSignal).any()):
+        return 0
     spikeTrain = numpy.zeros(spikeSignal.size)
     numOfSpikes = int(numpy.ceil(sum(spikeSignal)))
+    spikeTrain[0] = 1
     
-    for i in range(numOfSpikes):
+    for i in range(numOfSpikes-1):
         maxVal = numpy.argmax(spikeSignal)
         spikeTrain[maxVal] = 1
-        spikeSignal[maxVal] /= 2 #TODO: this doesn't work! need to flatten stuff more extremely
+        spikeSignal[maxVal] /= 2 
     return(spikeTrain)
 
 def negativeTransientsCorrect(transients):
-    #kick out fraction of positive going transients relative to number of negative going ones
+    '''
+    @transients: list of transients to be checked/corrected
+    @return: same list, with the smallest transients removed in 
+    proportion to the number of negative going transients
+    '''
     numOfNeg = 0
     for i in transients:
         meanVal = numpy.mean(i.data)
@@ -516,8 +517,11 @@ def negativeTransientsCorrect(transients):
 
 def aucCorrect(transients, kernel):
     '''
-    naive approach, less accurate for overlapping activity
-    kicks out transients which lack surface area
+    @transients: list of transients to be checked/corrected
+    @kernel: kernel used for deconvolution
+    @return: same transients as before, minus those which have 
+    less than 10% of the kernel surface area
+    -naive approach, less accurate for overlapping activity
     '''
     kernelAUC = numpy.trapz(kernel)
     for i in (transients):
