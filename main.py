@@ -33,9 +33,7 @@ for filename in args.inputFile:
     print("on file:" + str(filename) + " with " + str(numOfVals) + " ROIs")
     baselineMatrix, baselineCoordinates = cal_neuroIm.pushToBaseline(rawMatrix,args.b)
     
-    eventTime = time.time()
-    transientMatrix = cal_neuroIm.thresholdEventDetect(baselineMatrix,args.q)
-    print "time for eventDetect is: %f" % (time.time()-eventTime)
+    transientMatrix,nopeLol = cal_neuroIm.eventDetect(baselineMatrix,args.q,3)
     #TODO: what is a good range for the slope calculations? should I hard-code this too? maybe add parameter sheet option for stuff
     meanKernel = cal_neuroIm.createMeanKernel(transientMatrix)
     
@@ -46,8 +44,8 @@ for filename in args.inputFile:
         import matplotlib.pyplot as plt
         #transientMatrix[i] = cal_neuroIm.aucCorrect(transientMatrix[i], meanKernel)
         #transientMatrix[i] = cal_neuroIm.negativeTransientsCorrect(transientMatrix[i])
-        f,(axarr0,axarr1) = plt.subplots(2, sharex=False)
-        axarr0.plot(baselineMatrix[:,i],lw=0.2)
+        f,(axarr0,axarr1,axarr2) = plt.subplots(3, sharex=True)
+        axarr0.plot(rawMatrix[:,i],lw=0.5)
         spikeSignal = cal_neuroIm.deconvolve(transientMatrix[i], meanKernel)
         
         #axarr2.hist(slopeDistributions[i][2], 100, normed=1, facecolor='green', alpha=0.75)
@@ -62,7 +60,7 @@ for filename in args.inputFile:
         #titleString = str(sum(spikeSignal)) + " " + str(sum(apList))
         #axarr1.text(1,2,titleString)
         #axarr1.plot(slopeDistribution[i][2],lw=0.1)
-        #axarr1.plot(spikeSignal,'r',lw=0.1)
+        axarr1.plot(spikeSignal,'r',lw=0.1)
         #axarr1.plot(apList,'black',alpha=0.8,lw=0.1)
         
         for j in transientMatrix[i]: # yes, iterate over transient objects
@@ -70,7 +68,9 @@ for filename in args.inputFile:
                 coords = j.coordinates
                 axarr0.plot(range(coords[0],coords[1]),baselineMatrix[coords[0]:coords[1],i],'r')
         axarr0.plot(baselineCoordinates[i],[0,0],'k.',lw=1)
+        
         outputFile = args.o+filename.split("/")[-1] +str(i)+".png"
+        
         plt.savefig(outputFile)
         plt.close()
         

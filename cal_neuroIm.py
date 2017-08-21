@@ -132,7 +132,7 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
                     correctionVal = numpy.percentile(collumn[verticalPosition:verticalPosition+quantileWidth],q=8)
                 else:
                     correctionVal = numpy.percentile(collumn[numOfEntries-quantileWidth:],q=8)
-                collumn[verticalPosition] -= correctionVal
+                dataMatrix[verticalPosition,horizontalPosition] -= correctionVal
                 
             if (not isEvent): 
                 # we're not in an event ... so check if one is starting
@@ -162,11 +162,10 @@ def eventDetect (dataMatrix, quantileWidth,slopeWidth):
 
         #eventEndCoordinates.append(theseEventEndCoordinates[:])
         transients.append(theseTransients)
-        collumn += shiftValue # shift of data to avoid negatives if we quantile corrected
+        dataMatrix[:,horizontalPosition] += shiftValue # shift of data to avoid negatives if we quantile corrected
         #if (theseEventEndCoordinates):axarr2
             #collumn = discardNonEvent(collumn, theseEventEndCoordinates,baseLineArray[horizontalPosition])
-
-    return (transients,slopeDistributions);
+    return (transients,dataMatrix);
 
 def thresholdEventDetect(dataMatrix, quantileWidth):
     '''
@@ -214,79 +213,23 @@ def thresholdEventDetect(dataMatrix, quantileWidth):
         transients.append(theseTransients)
     return(transients)
 
-def _quantileCorrect (inputArray, eventCoordinates, windowSize):
-    ''' 
-    DEPRECATED - non-transient data is ignored anyway, quantile correction is handled by eventDetect
-    takes input array and coordinates of transients, quantile corrects non-transient data 
-    '''
-    correctionArray = numpy.zeros(len(inputArray))
-    if(len(eventCoordinates) == 0):
-        return(inputArray)
-    dataSize = len(inputArray)
-    priorEnd = 0
-    iterationStart = 0
-    iterationEnd = len(eventCoordinates)     
-    if (eventCoordinates[0][0] == 0): 
-        priorEnd = eventCoordinates[0][1]
-        iterationStart += 1 
-        
-    for j in range(iterationStart,iterationEnd): # iterates over num of events
-        posteriorStart = eventCoordinates[j][0] 
-        posteriorEnd = eventCoordinates[j][1] 
-        
-        for k in range(priorEnd,posteriorStart): # from last event end to next event start    
-            if (k + windowSize >= posteriorStart): # check if there is an event in the k + windowSize range (which we have to wrap around)
-
-                if(posteriorEnd + windowSize > dataSize): # check if we have a conflict with the end of the data
-                    correctionValue = numpy.percentile(inputArray[k:posteriorStart], 8)
-                    inputArray[k] -= correctionValue
-                    correctionArray[k] = correctionValue                       
-                else: # we have no conflict with end of data, wrap around event normally
-                    concatSlice = numpy.concatenate([inputArray[k:posteriorStart],inputArray[posteriorEnd:posteriorEnd+windowSize - posteriorStart + k]])
-                    correctionValue = numpy.percentile(concatSlice, 8)
-                    inputArray[k] -=correctionValue
-                    correctionArray[k] = correctionValue
-                    
-            else: # no event in range
-                if(k+windowSize > dataSize): # are we at the end of the data?
-                    correctionValue = numpy.percentile(inputArray[dataSize-k:], 8)
-                    inputArray[k] -= correctionValue
-                    correctionArray[k] = correctionValue
-                    
-                else: # no, just point correct
-                    correctionValue = numpy.percentile(inputArray[k:k+windowSize],8)
-                    inputArray[k] -= correctionValue
-                    correctionArray[k] = correctionValue
-        priorEnd = posteriorEnd
-        
-    if (eventCoordinates[-1][1] != dataSize-1): # no event covering the end, need to norm last portion of data
-        for k in range(eventCoordinates[-1][1],dataSize):
-            correctionValue = numpy.percentile(inputArray[k:k+windowSize], q=8)
-            inputArray[k] -= correctionValue
-            correctionArray[k] = correctionValue         
-    return (inputArray,correctionArray);
-
-def _quantileNorm (inputArray, eventCoordinates, windowSize):
+def _quantileNorm (inputArray, windowSize):
     '''DEPRECATED Alternative version of quantileCorrect which does not skip over events- not in use, eventDetect does this anyway
     '''
-    if(len(eventCoordinates) == 0):
-        return(inputArray)
-    position = 0
-    correctionArray = numpy.zeros(len(inputArray))
-    
-    for event in eventCoordinates:
-        while(position < event[0]):
-            correctionValue = numpy.percentile(inputArray[position:position+windowSize], 8)
-            inputArray[position] -= correctionValue
-            correctionArray[position] = (correctionValue)
-            position += 1
-        position = event[1]
-    if (eventCoordinates[-1][1] != len(inputArray)-1):
-        #thisSlice = inputArray[len(inputArray)-windowSize:len(inputArray-1)]
-        for i in range(eventCoordinates[-1][1],len(inputArray)):
-            correctionValue = numpy.percentile(inputArray[i:i+windowSize], 8)
-            inputArray[i] -= correctionValue
-            correctionArray[position] = (correctionValue)
+    correctionArray = numpy.zeros(inputArray.shape)
+    for pos,i in enumerate(inputArray.T):
+        if(isinstance(i,numpy.ndarray)):
+            shiftValue = numpy.percentile(inputArray[:,pos],92)
+            for j in range(len(i)):
+                correctionVal = numpy.percentile(inputArray[j:j+windowSize,pos],5)
+                inputArray[j,pos] -= correctionVal
+                correctionArray[j,pos] = correctionVal
+            i[...] += shiftValue
+        else:
+            shiftValue = numpy.percentile(inputArray,92)
+            correctionVal = numpy.percentile(inputArray[pos:pos+windowSize],92)
+            i[...] -= correctionVal
+            correctionArray[pos] = correctionVal
     return(inputArray,correctionArray);
 
 
