@@ -3,7 +3,7 @@ Created on Oct 3, 2016
 script contains methods used for main.py
 @author: maximilian
 '''
-import numpy, time
+import numpy
 from scipy.ndimage.filters import gaussian_filter
 from scipy.stats import norm
 from scipy.optimize import curve_fit
@@ -44,9 +44,9 @@ def _importMatrix(filename,valSeparator):
         except XLRDError:
             print("Wrong format! The file might contain comma-seperated values. Try using the -sep argument (E.G. -sep '\\t'")
             exit()
-    #if(dataMatrix.dtype != "float64"):
-     #   print ("Can't convert file input to float! Wrong separator argument?")
-      #  exit()
+    if(dataMatrix.dtype != "float64"):
+        print ("Can't convert file input to float! Wrong separator argument?")
+        exit()
     dataMatrix = numpy.nan_to_num(dataMatrix)
     return(dataMatrix, numOfRois)
 
@@ -278,7 +278,7 @@ def _detectBaseline (data, bucketSize):
     @return: bin with the lowest noise and its starting coordinate, in a tuple
     '''
     numOfEntries = len(data)
-    lowestSigma = sys.maxint # for size comparasion
+    lowestSigma = sys.maxsize # for size comparasion
     baselineArray = numpy.zeros(bucketSize)
     coordinate = []
     for j in range(0,int(numOfEntries-bucketSize),int(numOfEntries/(bucketSize*2))): 
@@ -316,7 +316,7 @@ def _detectNumOfPeaks(data):
     if(len(data) <10):
         return(1)
     numOfPeaks = 0
-    steps = len(data)/10
+    steps = int(len(data)/10)
     data2 = [sum(data[i:i+steps-1])/steps for i in range(len(data)-steps)]
     data = gaussian_filter(data2, 9)    
     prevPoint = 0
