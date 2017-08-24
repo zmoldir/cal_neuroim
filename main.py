@@ -47,15 +47,15 @@ for filename in args.inputFile:
     print("on file:" + str(filename) + " with " + str(numOfVals) + " ROIs")
     time1 = time.time()
     baselineMatrix, baselineCoordinates = cal_neuroIm.pushToBaseline(rawMatrix,args.b)
-    print ("time for baseline correction: %f" %(time.time() - time1))
+    print("time for baseline correction: %f" %(time.time() - time1))
     time2 = time.time()
     transientMatrix,slopeDistributions = cal_neuroIm.eventDetect(baselineMatrix,args.q,args.s,args.c,args.n,args.m)
-    print ("time for event detection: %f" %(time.time() - time2))
+    print("time for event detection: %f" %(time.time() - time2))
     time3 = time.time()
     
     #TODO: what is a good range for the slope calculations? should I hard-code this too? maybe add parameter sheet option for stuff
     meanKernel = cal_neuroIm.createMeanKernel(transientMatrix)
-    print ("time for mean kernel: %f" %(time.time() - time3))
+    print("time for mean kernel: %f" %(time.time() - time3))
     
     #transientMatrix = cal_neuroIm.aucCorrect(transientMatrix, meanKernel)
     #apTimings,uselessValue = cal_neuroIm._importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/apsHalf',",")
@@ -95,7 +95,7 @@ for filename in args.inputFile:
     #transientMatrix = cal_neuroIm.aucCorrect(transientMatrix, meanKernel)
     time4 = time.time()
     deconvolvedMatrix = array(cal_neuroIm.deconvolve(transientMatrix, meanKernel)).transpose()
-    print ("time for  deconvolution: %f" %(time.time() - time4))
+    print("time for  deconvolution: %f" %(time.time() - time4))
     
     savetxt(outFileList[counter], deconvolvedMatrix, fmt="%i", delimiter=" ")
     

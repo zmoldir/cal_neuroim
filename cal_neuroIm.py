@@ -21,7 +21,7 @@ def _importMatrix(filename,valSeparator):
         try:
             frame = pandas.read_csv(filename,sep = valSeparator,engine='python',skipinitialspace=True)    
         except (IOError,pandas.errors.ParserError) as err:
-            print err
+            print(err)
             print("See error message above! Either wrong file path or wrong separator.")
             exit()
         numOfVals = frame.shape[1]
@@ -389,8 +389,6 @@ def createMeanKernel(transientMatrix):
     divideArray.resize(len(meanArray))
     meanArray = meanArray / (divideArray)
     tVariable = numpy.arange(0,len(meanArray),1.)
-    print len(meanArray)
-    
     popt, pcov = curve_fit(_alphaKernel, tVariable,meanArray, p0=[80,100,50],maxfev=100000)
     plt.plot(tVariable, meanArray, label="meanArray")
     plt.plot(_alphaKernel(tVariable, *popt), 'r-', label='fit')
