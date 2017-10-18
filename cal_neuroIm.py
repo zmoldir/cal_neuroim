@@ -65,7 +65,7 @@ def _meanSlope(inArray):
     '''
     Given a time series, return the slope (which only depends on the start and end point)
     '''
-    avgSlope = (inArray[-1] - inArray[0])/len(inArray)
+    avgSlope = (inArray[-1] - inArray[0])/(len(inArray)-1)
     return (float(avgSlope))
 
 def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,startNum=None,minEventLength=None):
@@ -77,13 +77,12 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
     @return: transients: list (or list of lists) of objects of the type transient, one list per ROI (i.e. row in dataMatrix)
             slopeDistribution: distribution of slopes within the data, not used for further calculations but nice for visualizations
     ''' 
-    
     #if- block below: default parameter values if none are supplied - overwritten if you hand the function anything
     if quantileWidth == None: quantileWidth = 0
     if slopeWidth == None: slopeWidth = 3
     if cutoff == None: cutoff = 2
-    if startNum == None: startNum = 5
-    if minEventLength == None:  minEventLength = 30 # number of data points necessary above start level for an event to be kept as such
+    if startNum == None: startNum = 3
+    if minEventLength == None:  minEventLength = 5 # number of data points necessary above start level for an event to be kept as such
     
     transients = [] # list of lists of transients
     numOfEntries = len(dataMatrix) # number of entries in file
@@ -93,13 +92,14 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
     slopeDistributions = []
     # here we generate a global noise / slope threshold for all ROIs of the file
     for collumn in dataMatrix.T: 
+        collumn = numpy.trim_zeros(collumn,'b')
         #TODO: if I have the time for this, I should try to turn this into an nditer somehow 
-        slopeList = numpy.zeros(numOfEntries - slopeWidth)
-        for i,val in enumerate(slopeList):
-            slopeList[i]=  (_meanSlope(collumn[i:i+slopeWidth]))
-            if numpy.isnan(slopeList[i]):
-                slopeList = slopeList[:i-1]
-                break
+
+        collumn = pandas.DataFrame(collumn)
+        slopeList = collumn.rolling(slopeWidth,min_periods=1).apply(lambda x : _meanSlope(x))
+        slopeList = slopeList.rolling(slopeWidth,min_periods=1).mean().as_matrix()
+        slopeList = numpy.nan_to_num(slopeList)
+        
         # best fit of data according to the log-likelihood maximization estimate
         thisMode = mode(numpy.around(slopeList,3),axis=None)[0]
         slopeList2 = [i for i in slopeList if i > thisMode]
@@ -110,6 +110,7 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
         
         import matplotlib.pyplot as plt
         import matplotlib.mlab as mlab
+
         #TODO: crash here is "max must be larger than min in range parameter"...
         n, bins, patches = plt.hist(slopeList, 100, normed=1, facecolor='green', alpha=0.75)
         y = mlab.normpdf( bins, mu, sigma)
@@ -117,7 +118,7 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
         plt.close()
     # re-iterate over the data ROI-wise for determination of event positions - in reverse order because we delete skipped rows immediately
     for horizontalPosition, collumn in enumerate(dataMatrix.T): # generate local noise / slope threshold and consider if we should skip
-        collumn = collumn[~numpy.isnan(collumn)].T # looks stupid but makes the general code more pythonic (instead of referencing collumns via slicing)
+        collumn = numpy.trim_zeros(collumn,'b').T # looks stupid but makes the general code more pythonic (instead of referencing collumns via slicing)
         numOfEntries = len(collumn)
         thisSlopeThreshold = thresholdList[horizontalPosition]# threshold to be passed for start of significance 
         isEvent = False # bool to remember wether we are in event-mode
@@ -175,19 +176,20 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
             #collumn = discardNonEvent(collumn, theseEventEndCoordinates,baseLineArray[horizontalPosition])
     return (transients,slopeDistributions);
 
-def thresholdEventDetect(dataMatrix, quantileWidth=None, minEventLength= None):
+def thresholdEventDetect(dataMatrix, quantileWidth=None, minEventLength= None, thresholdDeviance= None):
     '''
     alternative to eventDetect, uses a simple threshold (baseline mean + 5 standard deviations of baseline) for transient detection
     '''
     if quantileWidth == None: quantileWidth = 0
     if minEventLength == None: minEventLength = 15
+    if thresholdDeviance == None: thresholdDeviance = 2.5
+    
     transients = []
     numOfVals =  len(dataMatrix)
-
     for collumn in (dataMatrix.T):
         theseTransients = []
         eventBool = True
-        collumn = collumn.T
+        collumn = numpy.trim_zeros(collumn,'b').T
         eventStart = 0
         eventEnd = 0
         numOfEntries = len(collumn)
@@ -201,26 +203,37 @@ def thresholdEventDetect(dataMatrix, quantileWidth=None, minEventLength= None):
                     else:
                         correctionValue = numpy.percentile(collumn[numOfVals-quantileWidth:],8)
                     value[...] -= correctionValue
-        
         base = _detectBaseline(collumn,400)[0]
         baseMean = numpy.mean(base)
-        threshold =  baseMean +0.5#+ numpy.std(collumn) * 2
+        deviance = numpy.std(collumn)
+        threshold =  baseMean + deviance * thresholdDeviance
         for position2,value in enumerate(collumn):
             if eventBool: # we are not in an event, check if one is starting
                 if threshold < value:# yes: below, no: continue
                     #print("event started at val: %f vs thres %f" % (value, threshold))
                     eventBool = False
-                    eventStart = position2
+                    onset = _getOnsetCoordinate(collumn[max(position2-100,0):position2],baseMean+ deviance)
+                    
+                    eventStart = position2 - onset
             else:
-                if threshold > value and minEventLength <  position2 - eventStart:
+                if baseMean + deviance > value and minEventLength <  position2 - eventStart:
                     eventBool = True
                     eventEnd = position2
-                    theseTransients.append(_Transient(collumn[eventStart:eventEnd]-1,eventStart,eventEnd,numOfEntries))
+                    theseTransients.append(_Transient(collumn[eventStart:eventEnd]-baseMean,eventStart,eventEnd,numOfEntries))
         if(not eventBool):
             theseTransients.append(_Transient(collumn[eventStart:]-1,eventStart,len(collumn),numOfEntries))
 
         transients.append(theseTransients)
     return(transients)
+
+def _getOnsetCoordinate(roi,baseMean):
+    '''
+    short code snippet to find onset coordinate in front of the threshold-passing data point
+    '''
+    for onset,val in enumerate(reversed(roi)):
+        if val <= baseMean:
+            return onset
+    return 0
 
 def _quantileNorm (inputArray, windowSize):
     '''DEPRECATED Alternative version of quantileCorrect which does not skip over events- not in use, eventDetect does this anyway
@@ -260,15 +273,14 @@ def pushToBaseline (dataMatrix, bucketSize=None):
     @return: baseline corrected version of the data: 
             coordList: tuple with start / end coordinate of the region determined as baseline activity, for visualization purposes
     '''
-    if bucketSize == None:
-        bucketSize = 300
+    if bucketSize == None: bucketSize = 300
     coordList = []
     for roi in (dataMatrix.T): # iterate over number of ROIs in file, e.g. collumn-wise
         baseLineArray, coordinates= _detectBaseline(roi, bucketSize)
         meanVal = abs(numpy.mean(baseLineArray))
         coordList.append(coordinates)
-        roi[...] = roi/meanVal -1 # baseline correction 
-            #dataMatrix[:,i] = dataMatrix[:,i]/(std(baseLineArray))
+        roi[...] = roi/meanVal - numpy.mean(baseLineArray/meanVal)# baseline correction 
+        
     return (dataMatrix,coordList);
 
 def _detectBaseline (data, bucketSize):
@@ -277,15 +289,17 @@ def _detectBaseline (data, bucketSize):
     @param bucketSize: size of the bins to be checked
     @return: bin with the lowest noise and its starting coordinate, in a tuple
     '''
+    data = numpy.trim_zeros(data, 'b')
     numOfEntries = len(data)
     lowestSigma = sys.maxsize # for size comparasion
-    baselineArray = numpy.zeros(bucketSize)
+    #baselineArray = numpy.zeros(bucketSize)
     coordinate = []
     for j in range(0,int(numOfEntries-bucketSize),int(numOfEntries/(bucketSize*2))): 
         thisStd = numpy.std(data[j:j+bucketSize])#(axisStd(data[j:j+bucketSize])) # current deviation
         if (thisStd < lowestSigma): # new min deviation found
             lowestSigma = thisStd
             coordinate = (j,j+bucketSize)
+            #TODO: list index out of range bei dem call von thresholdeventdetect ... why?
         baselineArray = data[coordinate[0]:coordinate[1]]
     return(baselineArray, coordinate)
 
@@ -392,7 +406,7 @@ def createMeanKernel(transientMatrix):
     popt, pcov = curve_fit(_alphaKernel, tVariable,meanArray, p0=[80,100,50],maxfev=100000)
     plt.plot(tVariable, meanArray, label="meanArray")
     plt.plot(_alphaKernel(tVariable, *popt), 'r-', label='fit')
-    plt.savefig('/home/maximilian/unistuff/paris_ens/cal_neuroim/testData/alphaKernel.png')
+    plt.savefig('/home/maximilian/unistuff/paris_ens/cal_neuroim/alphaKernel.png')
     plt.close()
     return(_alphaKernel(numpy.arange(i.numOfFrames),*popt))
 

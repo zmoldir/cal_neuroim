@@ -31,7 +31,7 @@ inputParser.add_argument('-m','-minEventLength', help="Minimum number of data po
 inputParser.add_argument('-seperator',"-sep",help="Seperator used for entries in the input matrix - if it is human readable (e.g. csv format).", nargs='?',default="False")        
 args = inputParser.parse_args()
 
-apFileList = ['/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/aps1',
+'''apFileList = ['/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/aps1',
               '/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/aps2',
               '/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/aps4',
               '/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/aps10']
@@ -40,16 +40,17 @@ outFileList = ["/home/maximilian//unistuff/paris_ens/cal_neuroim/simdata/foldCha
                "/home/maximilian//unistuff/paris_ens/cal_neuroim/simdata/foldChanges/deconvo3",
                "/home/maximilian//unistuff/paris_ens/cal_neuroim/simdata/foldChanges/deconvo4",
                "/home/maximilian//unistuff/paris_ens/cal_neuroim/simdata/foldChanges/deconvo5"]
-counter = -1
+counter = -1'''
 for filename in args.inputFile:
-    counter += 1
+    #counter += 1
     rawMatrix, numOfVals = cal_neuroIm._importMatrix(filename,args.seperator)
     print("on file:" + str(filename) + " with " + str(numOfVals) + " ROIs")
     time1 = time.time()
     baselineMatrix, baselineCoordinates = cal_neuroIm.pushToBaseline(rawMatrix,args.b)
     print("time for baseline correction: %f" %(time.time() - time1))
     time2 = time.time()
-    transientMatrix,slopeDistributions = cal_neuroIm.eventDetect(baselineMatrix,args.q,args.s,args.c,args.n,args.m)
+    #transientMatrix = cal_neuroIm.thresholdEventDetect(baselineMatrix,args.q,5,2)
+    transientMatrix, slopeDistributions = cal_neuroIm.eventDetect(baselineMatrix, args.q, args.s, args.c, args.n, args.m)
     print("time for event detection: %f" %(time.time() - time2))
     time3 = time.time()
     
@@ -58,45 +59,46 @@ for filename in args.inputFile:
     print("time for mean kernel: %f" %(time.time() - time3))
     
     #transientMatrix = cal_neuroIm.aucCorrect(transientMatrix, meanKernel)
-    #apTimings,uselessValue = cal_neuroIm._importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/simdata/apsHalf',",")
-    '''
+    #meanKernel = cal_neuroIm.createMeanKernel(transientMatrix)
+    apTimings,uselessValue = cal_neuroIm._importMatrix('/home/maximilian/unistuff/paris_ens/cal_neuroim/testData/cai-2/cai2_geco_full_aps.csv'," ")
+    
     for i in range(numOfVals):#print("decon time: %f vs. total plotting loop time: %f" % (decontime,time.time() - time2))
 
         import matplotlib.pyplot as plt
-        transientMatrix[i] = cal_neuroIm.aucCorrect(transientMatrix[i], meanKernel)
+        #transientMatrix[i] = cal_neuroIm.aucCorrect(transientMatrix[i], meanKernel)
         #transientMatrix[i] = cal_neuroIm.negativeTransientsCorrect(transientMatrix[i])
         
         
-        f,(axarr0,axarr1,axarr2) = plt.subplots(3, sharex=True)
-        axarr0.plot(rawMatrix[:,i],lw=0.2)
+        #f,(axarr0,axarr1,axarr2) = plt.subplots(3, sharex=True)
+        #axarr0.plot(rawMatrix[:,i],lw=0.2)
+        plt.plot(rawMatrix[:,i],lw=0.2)
         spikeSignal = cal_neuroIm.deconvolve(transientMatrix[i], meanKernel)
         
-        axarr2.hist(slopeDistributions[i][2], 100, normed=1, facecolor='green', alpha=0.75)
-        axarr2.plot(slopeDistributions[i][0],slopeDistributions[i][1],'r--', linewidth=2)
-        axarr2.plot([slopeDistributions[i][3],slopeDistributions[i][3]],[0,max(slopeDistributions[i][2])],'k--',lw=3)
+        #axarr2.hist(slopeDistributions[i][2], 100, normed=1, facecolor='green', alpha=0.75)
+        #axarr2.plot(slopeDistributions[i][0],slopeDistributions[i][1],'r--', linewidth=2)
+        #axarr2.plot([slopeDistributions[i][3],slopeDistributions[i][3]],[0,max(slopeDistributions[i][2])],'k--',lw=3)
         
-        #theseTimings = apTimings[:,i][~isnan(apTimings[:,i])]
-        #titleString = str(sum(spikeSignal)) + " " + str(sum(theseTimings))
-        #axarr1.text(1,2,titleString)
-        #axarr2.plot(spikeSignal,'r',lw=0.1)
-        #axarr1.plot(theseTimings,'black',alpha=0.8,lw=0.1)
-        
-        for j in transientMatrix[i]: # yes, iterate over transient objects
+        theseTimings = apTimings[:,i][~isnan(apTimings[:,i])]
+        titleString =  str(sum(theseTimings)) #str(sum(spikeSignal)) + " " +
+        plt.text(1,2,titleString)
+        #plt.plot(spikeSignal,'r',lw=0.1)
+        plt.plot(theseTimings,'black',alpha=0.8,lw=0.1)
+        '''for j in transientMatrix[i]: # yes, iterate over transient objects
             if(transientMatrix[i]): # is there a transient in this time series?
                 coords = j.coordinates
-                axarr0.plot(range(coords[0],coords[1]),baselineMatrix[coords[0]:coords[1],i],'r')
-        axarr0.plot(baselineCoordinates[i],[0,0],'k.',lw=1)
-        
+                plt.plot(range(coords[0],coords[1]),baselineMatrix[coords[0]:coords[1],i],'r')
+        plt.plot(baselineCoordinates[i],[0,0],'k.',lw=1)
+        '''
         outputFile = args.o+filename.split("/")[-1] +str(i)+".png"
         
         plt.savefig(outputFile)
         plt.close()
-        '''
-    #transientMatrix = cal_neuroIm.aucCorrect(transientMatrix, meanKernel)
-    time4 = time.time()
-    deconvolvedMatrix = array(cal_neuroIm.deconvolve(transientMatrix, meanKernel)).transpose()
-    print("time for  deconvolution: %f" %(time.time() - time4))
+        
     
-    savetxt(outFileList[counter], deconvolvedMatrix, fmt="%i", delimiter=" ")
+    #time4 = time.time()
+    #deconvolvedMatrix = array(cal_neuroIm.deconvolve(transientMatrix, meanKernel)).transpose()
+    #print("time for  deconvolution: %f" %(time.time() - time4))
+    
+    #savetxt(outFileList[counter], deconvolvedMatrix, fmt="%i", delimiter=" ")
     
 print("--- %s seconds runtime --- output is in %s" % (time.time() - start_time, args.o))
