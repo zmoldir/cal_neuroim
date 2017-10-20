@@ -68,7 +68,7 @@ def _meanSlope(inArray):
     avgSlope = (inArray[-1] - inArray[0])/(len(inArray)-1)
     return (float(avgSlope))
 
-def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,startNum=None,minEventLength=None):
+def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,startNum=None,minEventLength=None,sigma=None):
     '''
     @dataMatrix: NxM matrix of the data containing transients and drift(possibly)
     @windowSize: size of the window considered for the quantile normalization (none if q = 0)
@@ -78,6 +78,7 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
             slopeDistribution: distribution of slopes within the data, not used for further calculations but nice for visualizations
     ''' 
     #if- block below: default parameter values if none are supplied - overwritten if you hand the function anything
+    if sigma == None: sigma = 7
     if quantileWidth == None: quantileWidth = 0
     if slopeWidth == None: slopeWidth = 3
     if cutoff == None: cutoff = 2
@@ -93,8 +94,6 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
     # here we generate a global noise / slope threshold for all ROIs of the file
     for collumn in dataMatrix.T: 
         collumn = numpy.trim_zeros(collumn,'b')
-        #TODO: if I have the time for this, I should try to turn this into an nditer somehow 
-
         collumn = pandas.DataFrame(collumn)
         slopeList = collumn.rolling(slopeWidth,min_periods=1).apply(lambda x : _meanSlope(x))
         slopeList = slopeList.rolling(slopeWidth,min_periods=1).mean().as_matrix()
@@ -104,9 +103,9 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
         thisMode = mode(numpy.around(slopeList,3),axis=None)[0]
         slopeList2 = [i for i in slopeList if i > thisMode]
         
-        mu, sigma = norm.fit(slopeList2)
+        mu, deviance = norm.fit(slopeList2)
         # the histogram of the data
-        thresholdList.append(sigma*cutoff) 
+        thresholdList.append(deviance*cutoff) 
         
         import matplotlib.pyplot as plt
         import matplotlib.mlab as mlab
@@ -161,13 +160,13 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
                     eventEnd = verticalPosition
                     threshHit = 0
                     if(eventEnd-eventStart > minEventLength):
-                        theseTransients.append(_Transient(collumn[eventStart:eventEnd],eventStart,eventEnd,numOfEntries))
+                        theseTransients.append(_Transient(collumn[eventStart:eventEnd],eventStart,eventEnd,numOfEntries,sigma))
             if (verticalPosition >= len(collumn)-slopeWidth-1):
                 break
         if(isEvent):
             # event lasted until end of the data, correct the last bit
             #theseEventEndCoordinates.append([eventStart,eventEnd])
-            theseTransients.append(_Transient(collumn[eventStart:],eventStart,numOfEntries,numOfEntries))
+            theseTransients.append(_Transient(collumn[eventStart:],eventStart,numOfEntries,numOfEntries,sigma))
 
         #eventEndCoordinates.append(theseEventEndCoordinates[:])
         transients.append(theseTransients)
@@ -176,10 +175,11 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
             #collumn = discardNonEvent(collumn, theseEventEndCoordinates,baseLineArray[horizontalPosition])
     return (transients,slopeDistributions);
 
-def thresholdEventDetect(dataMatrix, quantileWidth=None, minEventLength= None, thresholdDeviance= None):
+def thresholdEventDetect(dataMatrix, quantileWidth=None, minEventLength= None, thresholdDeviance= None,sigma=None):
     '''
     alternative to eventDetect, uses a simple threshold (baseline mean + 5 standard deviations of baseline) for transient detection
     '''
+    if sigma == None: sigma = 7
     if quantileWidth == None: quantileWidth = 0
     if minEventLength == None: minEventLength = 15
     if thresholdDeviance == None: thresholdDeviance = 2.5
@@ -219,9 +219,9 @@ def thresholdEventDetect(dataMatrix, quantileWidth=None, minEventLength= None, t
                 if baseMean + deviance > value and minEventLength <  position2 - eventStart:
                     eventBool = True
                     eventEnd = position2
-                    theseTransients.append(_Transient(collumn[eventStart:eventEnd]-baseMean,eventStart,eventEnd,numOfEntries))
+                    theseTransients.append(_Transient(collumn[eventStart:eventEnd]-baseMean,eventStart,eventEnd,numOfEntries,sigma))
         if(not eventBool):
-            theseTransients.append(_Transient(collumn[eventStart:]-1,eventStart,len(collumn),numOfEntries))
+            theseTransients.append(_Transient(collumn[eventStart:]-1,eventStart,len(collumn),numOfEntries,sigma))
 
         transients.append(theseTransients)
     return(transients)
@@ -326,13 +326,16 @@ def _maxAmp(inputData):
     max_index = numpy.argmax(inputData)
     return(inputData[max_index], max_index);
 
-def _detectNumOfPeaks(data):
+def _detectNumOfPeaks(data,sigma):
     if(len(data) <10):
         return(1)
     numOfPeaks = 0
+    import matplotlib.pyplot as plt
     steps = int(len(data)/10)
-    data2 = [sum(data[i:i+steps-1])/steps for i in range(len(data)-steps)]
-    data = gaussian_filter(data2, 9)    
+    plt.plot(data.copy())
+    data = pandas.DataFrame(data)
+    data.rolling(steps,min_periods=3).mean().as_matrix()
+    data = gaussian_filter(data, sigma)    
     prevPoint = 0
     oldSign = 1
     for i in data:
@@ -341,7 +344,12 @@ def _detectNumOfPeaks(data):
             numOfPeaks += 1
         oldSign = newSign
         prevPoint = i
-    return(numOfPeaks);
+    
+    plt.plot(data)
+    plt.xlabel(numOfPeaks)
+    plt.title(numpy.ceil(numOfPeaks/2.))
+    plt.show()
+    return(numpy.ceil(numOfPeaks/2.));
 
 def createMeanKernel(transientMatrix):
     '''
@@ -510,7 +518,7 @@ class _Transient:
     '''
     class to store transient properties, such as rise time, decay time, amplitude and duration
     '''
-    def __init__(self, data, startTime,endTime, numOfFrames):
+    def __init__(self, data, startTime,endTime, numOfFrames,sigma):
         
         self.maxVal = _maxAmp(data)
         self.startTime = startTime
@@ -519,7 +527,7 @@ class _Transient:
         self.riseTime = int(self.maxVal[1])
         self.decayTime = int(len(data) + 1 - self.riseTime)
         self.totalTime = len(data)
-        self.numOfPeaks = _detectNumOfPeaks(data)
+        self.numOfPeaks = _detectNumOfPeaks(data,sigma)
         self.data = data
         self.numOfFrames = numOfFrames
         self.coordinates = (self.startTime, self.endTime)
