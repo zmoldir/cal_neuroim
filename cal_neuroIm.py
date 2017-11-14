@@ -26,6 +26,7 @@ def _importMatrix(filename,valSeparator):
             exit()
         numOfVals = frame.shape[1]
         dataMatrix = frame.as_matrix()
+        dataMatrix = numpy.nan_to_num(dataMatrix)
         numOfRois = len(dataMatrix)
         if(numOfVals < len(dataMatrix)):
             numOfRois = numOfVals
@@ -44,10 +45,11 @@ def _importMatrix(filename,valSeparator):
         except XLRDError:
             print("Wrong format! The file might contain comma-seperated values. Try using the -sep argument (E.G. -sep '\\t'")
             exit()
-    if(dataMatrix.dtype != "float64"):
+    if(not dataMatrix.dtype == "float64"):
+        if(dataMatrix.dtype == "int64"):
+            return(dataMatrix,numOfRois)
         print ("Can't convert file input to float! Wrong separator argument?")
         exit()
-    dataMatrix = numpy.nan_to_num(dataMatrix)
     return(dataMatrix, numOfRois)
 
 '''
@@ -74,6 +76,9 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
     @windowSize: size of the window considered for the quantile normalization (none if q = 0)
     @slopeWidth: size of the window considered for the calculation of slopes, critical parameter for event detection
     @cutoff: distance from slope distribution mean in standard deviance, where the value is taken as the transient threshold
+    @startNum: number of threshold hits necessary for an event start to be declared
+    @minEventLength: minimum number of frames above baseline for an event to be accepted
+    @sigma: sigma of the gaussian filter for number of peak determination in the transients
     @return: transients: list (or list of lists) of objects of the type transient, one list per ROI (i.e. row in dataMatrix)
             slopeDistribution: distribution of slopes within the data, not used for further calculations but nice for visualizations
     ''' 
@@ -117,6 +122,8 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
         plt.close()
     # re-iterate over the data ROI-wise for determination of event positions - in reverse order because we delete skipped rows immediately
     for horizontalPosition, collumn in enumerate(dataMatrix.T): # generate local noise / slope threshold and consider if we should skip
+        base = _detectBaseline(collumn,400)[0]
+        baseMean = numpy.mean(base)
         collumn = numpy.trim_zeros(collumn,'b').T # looks stupid but makes the general code more pythonic (instead of referencing collumns via slicing)
         numOfEntries = len(collumn)
         thisSlopeThreshold = thresholdList[horizontalPosition]# threshold to be passed for start of significance 
@@ -148,24 +155,25 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
                     threshHit += 1
                     if(threshHit == startNumOfHits):
                         eventStart = verticalPosition - startNumOfHits +1
-                        eventEnd = verticalPosition
                         isEvent = True
-    
             else: 
-                # we are in an event!
-                # does it end?
-                if (collumn[eventStart] > collumn[verticalPosition] #or collumn[verticalPosition] < baselineMean 
-                    and collumn[verticalPosition] < 1): # check if it ends
+                # we are in an event, does it end?
+                if (collumn[eventStart] > collumn[verticalPosition] or collumn[eventStart] < baseMean 
+                    or collumn[eventStart < 1]): # check if it ends
                     isEvent = False
                     eventEnd = verticalPosition
                     threshHit = 0
                     if(eventEnd-eventStart > minEventLength):
+                        
+                        eventStart -= _getOnsetCoordinate(collumn[max(eventStart-100,0):eventStart],baseMean)
                         theseTransients.append(_Transient(collumn[eventStart:eventEnd],eventStart,eventEnd,numOfEntries,sigma))
+                        
             if (verticalPosition >= len(collumn)-slopeWidth-1):
                 break
         if(isEvent):
             # event lasted until end of the data, correct the last bit
             #theseEventEndCoordinates.append([eventStart,eventEnd])
+            eventStart -= _getOnsetCoordinate(collumn[max(eventStart-100,0):eventStart],baseMean)
             theseTransients.append(_Transient(collumn[eventStart:],eventStart,numOfEntries,numOfEntries,sigma))
 
         #eventEndCoordinates.append(theseEventEndCoordinates[:])
@@ -213,7 +221,6 @@ def thresholdEventDetect(dataMatrix, quantileWidth=None, minEventLength= None, t
                     #print("event started at val: %f vs thres %f" % (value, threshold))
                     eventBool = False
                     onset = _getOnsetCoordinate(collumn[max(position2-100,0):position2],baseMean+ deviance)
-                    
                     eventStart = position2 - onset
             else:
                 if baseMean + deviance > value and minEventLength <  position2 - eventStart:
@@ -233,7 +240,7 @@ def _getOnsetCoordinate(roi,baseMean):
     for onset,val in enumerate(reversed(roi)):
         if val <= baseMean:
             return onset
-    return 0
+    return False
 
 def _quantileNorm (inputArray, windowSize):
     '''DEPRECATED Alternative version of quantileCorrect which does not skip over events- not in use, eventDetect does this anyway
@@ -299,7 +306,6 @@ def _detectBaseline (data, bucketSize):
         if (thisStd < lowestSigma): # new min deviation found
             lowestSigma = thisStd
             coordinate = (j,j+bucketSize)
-            #TODO: list index out of range bei dem call von thresholdeventdetect ... why?
         baselineArray = data[coordinate[0]:coordinate[1]]
     return(baselineArray, coordinate)
 
@@ -330,11 +336,10 @@ def _detectNumOfPeaks(data,sigma):
     if(len(data) <10):
         return(1)
     numOfPeaks = 0
-    import matplotlib.pyplot as plt
     steps = int(len(data)/10)
-    plt.plot(data.copy())
+
     data = pandas.DataFrame(data)
-    data.rolling(steps,min_periods=3).mean().as_matrix()
+    data.rolling(steps,min_periods=min(steps,3)).mean().as_matrix()
     data = gaussian_filter(data, sigma)    
     prevPoint = 0
     oldSign = 1
@@ -345,10 +350,6 @@ def _detectNumOfPeaks(data,sigma):
         oldSign = newSign
         prevPoint = i
     
-    plt.plot(data)
-    plt.xlabel(numOfPeaks)
-    plt.title(numpy.ceil(numOfPeaks/2.))
-    plt.show()
     return(numpy.ceil(numOfPeaks/2.));
 
 def createMeanKernel(transientMatrix):
@@ -412,11 +413,14 @@ def createMeanKernel(transientMatrix):
     meanArray = meanArray / (divideArray)
     tVariable = numpy.arange(0,len(meanArray),1.)
     popt, pcov = curve_fit(_alphaKernel, tVariable,meanArray, p0=[80,100,50],maxfev=100000)
+    print popt
     plt.plot(tVariable, meanArray, label="meanArray")
-    plt.plot(_alphaKernel(tVariable, *popt), 'r-', label='fit')
+    
+    plt.plot(_alphaKernel(tVariable*2, *popt), 'r-', label='fit')
     plt.savefig('/home/maximilian/unistuff/paris_ens/cal_neuroim/alphaKernel.png')
     plt.close()
-    return(_alphaKernel(numpy.arange(i.numOfFrames),*popt))
+    newKernel = numpy.tile(_alphaKernel(tVariable*2, *popt), i.numOfFrames/len(meanArray))
+    return(newKernel)
 
 def _alphaKernel (t, A,t_A,t_B):
     return A*(numpy.exp(-t/t_A)-numpy.exp(-t/t_B))
@@ -431,45 +435,50 @@ def deconvolve(transients, kernel):
     '''
     if (not transients): # no transients found - the input is empty.
         return(numpy.zeros(kernel.size))
-    
+    interpolSteps = 1
     if (any(isinstance(el, list) for el in transients)): #this is true, we have a list of lists -> iterate over lists and transients
         spikeSignal = numpy.zeros((len(transients),transients[0][0].numOfFrames))# problem: crashes if first ROI doesn't contain a transient
         for i,transientList in enumerate(transients):
             for transient in transientList:
-                
-                if transient.data.size > kernel.size:
-                    thisKernel = numpy.append(kernel,numpy.zeros(transient.data.size-kernel.size))
+                #problem we check for below: can we interpolate 10-point-wise, or is the transient too big?
+                if (transient.data.size*10 < transient.numOfFrames): 
+                    newTransient = numpy.interp(numpy.arange(0,len(transient.data),interpolSteps), range(len(transient.data)), transient.data)
+                    thisKernel1 = numpy.resize(kernel,len(newTransient))#transient.data.shape)
+                    deconvolved2 = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(newTransient), numpy.fft.fft(thisKernel1))))
+                    spikeSignal[i][transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved2,transient.data.size)
                 else:
-                    thisKernel = numpy.resize(kernel,transient.data.shape)
-                deconvolved = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(transient.data), numpy.fft.fft(thisKernel))))
-                spikeSignal[i][transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved)
-        
+                    thisKernel = numpy.resize(kernel,transient.data.size)
+                    deconvolved = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(transient.data), numpy.fft.fft(thisKernel))))
+                    spikeSignal[i][transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved)
+                     
     else: # the above clause is false, we have a list of transients and can iterate directly
         spikeSignal = numpy.zeros(transients[0].numOfFrames)
         for transient in (transients):
-            
-            if transient.data.size > kernel.size:
-                thisKernel = numpy.append(kernel,numpy.zeros(transient.data.size-kernel.size))
+            if (transient.data.size*10 < transient.numOfFrames): 
+                newTransient = numpy.interp(numpy.arange(0,len(transient.data),interpolSteps), range(len(transient.data)), transient.data)
+                thisKernel1 = numpy.resize(kernel,len(newTransient))#transient.data.shape)
+                deconvolved2 = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(newTransient), numpy.fft.fft(thisKernel1))))
+                spikeSignal[transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved2,transient.data.size)
+
             else:
-                thisKernel = numpy.resize(kernel,transient.data.shape)
-            
-            deconvolved = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(transient.data), numpy.fft.fft(thisKernel))))
- 
-            spikeSignal[transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved)
-    
-        
+                thisKernel = numpy.resize(kernel,transient.data.size)
+                deconvolved2 = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(transient.data), numpy.fft.fft(thisKernel))))
+                spikeSignal[transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved2)
     return(spikeSignal)
 
-def _generateSpiketrainFromSignal(spikeSignal):
+def _generateSpiketrainFromSignal(spikeSignal,originalLength = None):
+    interpolationFactor = 1
+    if originalLength == None: 
+        originalLength = spikeSignal.size
+        interpolationFactor = 1
     if (numpy.isnan(spikeSignal).any()):
         return 0
-    spikeTrain = numpy.zeros(spikeSignal.size)
+    spikeTrain = numpy.zeros(originalLength)
     numOfSpikes = int(numpy.ceil(sum(spikeSignal)))
     spikeTrain[0] = 1
-    #TODO: numOfSpikes explodes sometimes ... why?
-    for i in range(numOfSpikes-1):
+    for i in range(1,numOfSpikes):
         maxVal = numpy.argmax(spikeSignal)
-        spikeTrain[maxVal] = 1
+        spikeTrain[maxVal/interpolationFactor] = 1
         spikeSignal[maxVal] /= 2 
     return(spikeTrain)
 
