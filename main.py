@@ -63,7 +63,7 @@ for filename in args.inputFile:
     #transientMatrix = cal_neuroIm.aucCorrect(transientMatrix, meanKernel)
     #meanKernel = cal_neuroIm.createMeanKernel(transientMatrix)
     apTimings,uselessValue = cal_neuroIm._importMatrix(apFileList[counter]," ")
-    
+    '''
     for i in range(numOfVals):#print("decon time: %f vs. total plotting loop time: %f" % (decontime,time.time() - time2))
 
         import matplotlib.pyplot as plt
@@ -94,7 +94,7 @@ for filename in args.inputFile:
         
         plt.savefig(outputFile)
         plt.close()
-    
+    '''
     time4 = time.time()
     deconvolvedMatrix = array(cal_neuroIm.deconvolve(transientMatrix, meanKernel)).transpose()
     print("time for  deconvolution: %f" %(time.time() - time4))

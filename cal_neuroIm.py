@@ -395,32 +395,30 @@ def createMeanKernel(transientMatrix):
             currentTransient = i.data
             plt.plot(currentTransient,"grey",alpha=0.2)
             if(len(currentTransient)>len(meanArray)):
-                meanArray.resize(currentTransient.shape)
-                tempArray = numpy.ones(currentTransient.shape,dtype=int)
+                meanArray.resize(currentTransient.size)
+                tempArray = numpy.ones(currentTransient.size,dtype=int)
                 tempArray.resize(divideArray.shape,refcheck=False)
                 divideArray += tempArray  
                 meanArray += currentTransient
             else:
-                tempArray = numpy.ones(currentTransient.shape,dtype=int)
+                tempArray = numpy.ones(currentTransient.size,dtype=int)
                 tempArray.resize(divideArray.shape)
                 divideArray += tempArray
                 zerosArray = numpy.zeros(len(meanArray)-len(currentTransient))
                 currentTransient = numpy.concatenate((currentTransient, zerosArray))
                 meanArray += currentTransient
     # loop up top: finished adding single peak transients, need to divide by our divideArray (after cropping it accordingly)
-    
     divideArray.resize(len(meanArray))
     meanArray = meanArray / (divideArray)
     tVariable = numpy.arange(0,len(meanArray),1.)
     popt, pcov = curve_fit(_alphaKernel, tVariable,meanArray, p0=[80,100,50],maxfev=100000)
-    print popt
-    plt.plot(tVariable, meanArray, label="meanArray")
-    
-    plt.plot(_alphaKernel(tVariable*2, *popt), 'r-', label='fit')
-    plt.savefig('/home/maximilian/unistuff/paris_ens/cal_neuroim/alphaKernel.png')
-    plt.close()
-    newKernel = numpy.tile(_alphaKernel(tVariable*2, *popt), i.numOfFrames/len(meanArray))
-    return(newKernel)
+    # print popt
+    #plt.plot(tVariable, meanArray, label="meanArray")
+    #plt.plot(_alphaKernel(tVariable*2, *popt), 'r-', label='fit')
+    #plt.savefig('/home/maximilian/unistuff/paris_ens/cal_neuroim/alphaKernel.png')
+    #plt.close()
+    #newKernel = numpy.tile(_alphaKernel(tVariable*2, *popt), i.numOfFrames/len(meanArray))
+    return(_alphaKernel(numpy.arange(0,i.numOfFrames,1), *popt))
 
 def _alphaKernel (t, A,t_A,t_B):
     return A*(numpy.exp(-t/t_A)-numpy.exp(-t/t_B))
@@ -433,37 +431,36 @@ def deconvolve(transients, kernel):
     with n= number of frames, d= number of lists.
     Integer values correspond to the number of action potentials in the respective frame.
     '''
+    interpolSteps = 1
     if (not transients): # no transients found - the input is empty.
         return(numpy.zeros(kernel.size))
-    interpolSteps = 1
     if (any(isinstance(el, list) for el in transients)): #this is true, we have a list of lists -> iterate over lists and transients
         spikeSignal = numpy.zeros((len(transients),transients[0][0].numOfFrames))# problem: crashes if first ROI doesn't contain a transient
         for i,transientList in enumerate(transients):
             for transient in transientList:
                 #problem we check for below: can we interpolate 10-point-wise, or is the transient too big?
-                if (transient.data.size*10 < transient.numOfFrames): 
+                '''if (transient.data.size*10 < transient.numOfFrames): 
                     newTransient = numpy.interp(numpy.arange(0,len(transient.data),interpolSteps), range(len(transient.data)), transient.data)
                     thisKernel1 = numpy.resize(kernel,len(newTransient))#transient.data.shape)
                     deconvolved2 = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(newTransient), numpy.fft.fft(thisKernel1))))
                     spikeSignal[i][transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved2,transient.data.size)
-                else:
-                    thisKernel = numpy.resize(kernel,transient.data.size)
-                    deconvolved = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(transient.data), numpy.fft.fft(thisKernel))))
-                    spikeSignal[i][transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved)
-                     
+                else:'''
+                thisKernel = numpy.resize(kernel,transient.data.shape)
+                deconvolved = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(transient.data), numpy.fft.fft(thisKernel))))
+                spikeSignal[i][transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved)   
     else: # the above clause is false, we have a list of transients and can iterate directly
         spikeSignal = numpy.zeros(transients[0].numOfFrames)
         for transient in (transients):
-            if (transient.data.size*10 < transient.numOfFrames): 
+            '''if (transient.data.size*10 < transient.numOfFrames): 
                 newTransient = numpy.interp(numpy.arange(0,len(transient.data),interpolSteps), range(len(transient.data)), transient.data)
                 thisKernel1 = numpy.resize(kernel,len(newTransient))#transient.data.shape)
                 deconvolved2 = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(newTransient), numpy.fft.fft(thisKernel1))))
                 spikeSignal[transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved2,transient.data.size)
 
-            else:
-                thisKernel = numpy.resize(kernel,transient.data.size)
-                deconvolved2 = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(transient.data), numpy.fft.fft(thisKernel))))
-                spikeSignal[transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved2)
+            else:'''
+            thisKernel = numpy.resize(kernel,transient.data.shape)
+            deconvolved = numpy.real(numpy.fft.ifft(numpy.divide(numpy.fft.fft(transient.data), numpy.fft.fft(thisKernel))))
+            spikeSignal[transient.startTime:transient.endTime] = _generateSpiketrainFromSignal(deconvolved)
     return(spikeSignal)
 
 def _generateSpiketrainFromSignal(spikeSignal,originalLength = None):
@@ -473,6 +470,7 @@ def _generateSpiketrainFromSignal(spikeSignal,originalLength = None):
         interpolationFactor = 1
     if (numpy.isnan(spikeSignal).any()):
         return 0
+    
     spikeTrain = numpy.zeros(originalLength)
     numOfSpikes = int(numpy.ceil(sum(spikeSignal)))
     spikeTrain[0] = 1
