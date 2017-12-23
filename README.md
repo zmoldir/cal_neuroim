@@ -1,4 +1,7 @@
-README
+This implementation is intended for the deconvolution of calcium neuro-imaging data.
+It can either be used as a runnable script as-is, or used in parts by importing from the API,
+which it is originally intended for.
+
 _______________________________________________________________________________________________________
 See the section "running the script" of the PDF contained in this git for a more elaborate explanation!
 _______________________________________________________________________________________________________
