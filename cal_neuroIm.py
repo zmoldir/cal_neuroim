@@ -13,7 +13,7 @@ from scipy.stats.stats import mode
 
 def _importMatrix(filename,valSeparator):
     '''
-    imports csv or xls formatted file, returns ndArray 
+    imports csv or xls formatted file, returns ndArray - not really part of the distro
     @input: filename: input path; valSeperator: seperator between entries, treats file as xlrd if none
     @return: numOfVals: number of collumns in file (ROIs); dataMatrix: ndArray containing file data (dtype float)
     '''
@@ -115,7 +115,6 @@ def eventDetect (dataMatrix, quantileWidth=None,slopeWidth=None,cutoff=None,star
         import matplotlib.pyplot as plt
         import matplotlib.mlab as mlab
 
-        #TODO: crash here is "max must be larger than min in range parameter"...
         n, bins, patches = plt.hist(slopeList, 100, normed=1, facecolor='green', alpha=0.75)
         y = mlab.normpdf( bins, mu, sigma)
         slopeDistributions.append((bins,y,slopeList,sigma*cutoff))
@@ -329,10 +328,21 @@ def _detectPeakline (data, bucketSize):
     return(peaklineArray,coordinate)
 
 def _maxAmp(inputData):
+    '''
+    returns the highest value and corresponding coordinate
+    '''
     max_index = numpy.argmax(inputData)
     return(inputData[max_index], max_index);
 
-def _detectNumOfPeaks(data,sigma):
+def _detectNumOfPeaks(data,sigma = None):
+    '''
+    @param data: trace of which the number of peaks is to be determined
+    @param sigma: OPTIONAL, default is 7. Sigma to be plugged into the gaussian filter applied to the data
+    @return: number of peaks as Integer
+    counts the number of peaks, see the PDF coming with this distro (hopefully) for an explanation
+    '''
+    if sigma== None:
+        sigma = 7
     if(len(data) <10):
         return(1)
     numOfPeaks = 0
@@ -431,7 +441,6 @@ def deconvolve(transients, kernel):
     with n= number of frames, d= number of lists.
     Integer values correspond to the number of action potentials in the respective frame.
     '''
-    interpolSteps = 1
     if (not transients): # no transients found - the input is empty.
         return(numpy.zeros(kernel.size))
     if (any(isinstance(el, list) for el in transients)): #this is true, we have a list of lists -> iterate over lists and transients
